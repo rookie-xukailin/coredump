@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+bmccore.toml
+bmccore_report/
+*.tar.gz.tmp
+.pytest_cache/
+.zcode/

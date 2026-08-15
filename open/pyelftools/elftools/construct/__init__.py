@@ -1,0 +1,241 @@
+"""
+    ####                                                               ####
+   ##     ####  ##  ##  #### ###### #####  ##  ##  #### ######        ##  ##
+   ##    ##  ## ### ## ##      ##   ##  ## ##  ## ##      ##    ####      ##
+   ##    ##  ## ######  ###    ##   #####  ##  ## ##      ##            ##
+   ##    ##  ## ## ###    ##   ##   ##  ## ##  ## ##      ##          ##
+    ####  ####  ##  ## ####    ##   ##  ##  #####  ####   ##          ######
+
+                 Parsing made even more fun (and faster too)
+
+Homepage:
+    http://construct.wikispaces.com (including online tutorial)
+
+Typical usage:
+    >>> from ..construct import *
+
+Hands-on example:
+    >>> from ..construct import *
+    >>> s = Struct("foo",
+    ...     UBInt8("a"),
+    ...     UBInt16("b"),
+    ... )
+    >>> s.parse(b"\\x01\\x02\\x03")
+    Container({'a': 1, 'b': 515})
+    >>> print(s.parse(b"\\x01\\x02\\x03"))
+    Container({'a': 1, 'b': 515})
+    >>> s.build(Container(a=1, b=0x0203))
+    b'\\x01\\x02\\x03'
+"""
+
+from __future__ import annotations
+
+from .adapters import *
+from .core import *
+from .debug import Debugger, Probe
+
+# Legacy construct facade: star imports and late imports preserve the
+# public API.
+from .lib.container import *
+from .macros import *
+
+# ===============================================================================
+# Metadata
+# ===============================================================================
+__author__: str = "tomer filiba (tomerfiliba [at] gmail.com)"
+__maintainer__: str = "Corbin Simpson <MostAwesomeDude@gmail.com>"
+__version__: str = "2.06"
+
+# ===============================================================================
+# Shorthand expressions
+# ===============================================================================
+Bits = BitField
+Byte = UBInt8
+Bytes = Field
+Const = ConstAdapter
+Tunnel = TunnelAdapter
+Embed = Embedded
+
+# ===============================================================================
+# Deprecated names
+# Next scheduled name cleanout: 2.1
+# ===============================================================================
+import functools
+import warnings
+from types import FunctionType
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from typing_extensions import ParamSpec
+
+    _P = ParamSpec("_P")
+    _T = TypeVar("_T")
+
+
+def deprecated(f: Callable[_P, _T]) -> Callable[_P, _T]:
+    assert isinstance(f, (FunctionType, type))
+
+    @functools.wraps(f)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        warnings.warn(
+            f"This name is deprecated, use {f.__name__} instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+MetaBytes = deprecated(MetaField)
+GreedyRepeater = deprecated(GreedyRange)
+OptionalGreedyRepeater = deprecated(OptionalGreedyRange)
+Repeater = deprecated(Range)
+StrictRepeater = deprecated(Array)
+MetaRepeater = deprecated(Array)
+OneOfValidator = deprecated(OneOf)
+NoneOfValidator = deprecated(NoneOf)
+
+# ===============================================================================
+# exposed names
+# ===============================================================================
+__all__ = [
+    "AdaptationError",
+    "Adapter",
+    "Alias",
+    "Aligned",
+    "AlignedStruct",
+    "Anchor",
+    "Array",
+    "ArrayError",
+    "BFloat32",
+    "BFloat64",
+    "Bit",
+    "BitField",
+    "BitIntegerAdapter",
+    "BitIntegerError",
+    "BitStruct",
+    "Bits",
+    "Bitwise",
+    "Buffered",
+    "Byte",
+    "Bytes",
+    "CString",
+    "CStringAdapter",
+    "Const",
+    "ConstAdapter",
+    "ConstError",
+    "Construct",
+    "ConstructError",
+    "Container",
+    "Debugger",
+    "Embed",
+    "Embedded",
+    "EmbeddedBitStruct",
+    "Enum",
+    "ExprAdapter",
+    "Field",
+    "FieldError",
+    "Flag",
+    "FlagsAdapter",
+    "FlagsContainer",
+    "FlagsEnum",
+    "FormatField",
+    "GreedyRange",
+    "GreedyRepeater",
+    "HexDumpAdapter",
+    "If",
+    "IfThenElse",
+    "IndexingAdapter",
+    "LFloat32",
+    "LFloat64",
+    "LazyBound",
+    "LengthValueAdapter",
+    "ListContainer",
+    "Magic",
+    "MappingAdapter",
+    "MappingError",
+    "MetaArray",
+    "MetaBytes",
+    "MetaField",
+    "MetaRepeater",
+    "NFloat32",
+    "NFloat64",
+    "Nibble",
+    "NoneOf",
+    "NoneOfValidator",
+    "Octet",
+    "OnDemand",
+    "OnDemandPointer",
+    "OneOf",
+    "OneOfValidator",
+    "OpenRange",
+    "Optional",
+    "OptionalGreedyRange",
+    "OptionalGreedyRepeater",
+    "PaddedStringAdapter",
+    "Padding",
+    "PaddingAdapter",
+    "PaddingError",
+    "PascalString",
+    "Pass",
+    "Peek",
+    "Pointer",
+    "PrefixedArray",
+    "Probe",
+    "Range",
+    "RangeError",
+    "Reconfig",
+    "Rename",
+    "RepeatUntil",
+    "Repeater",
+    "Restream",
+    "SBInt8",
+    "SBInt16",
+    "SBInt32",
+    "SBInt64",
+    "SLInt8",
+    "SLInt16",
+    "SLInt32",
+    "SLInt64",
+    "SNInt8",
+    "SNInt16",
+    "SNInt32",
+    "SNInt64",
+    "Select",
+    "SelectError",
+    "Sequence",
+    "SizeofError",
+    "SlicingAdapter",
+    "StaticField",
+    "StrictRepeater",
+    "String",
+    "StringAdapter",
+    "Struct",
+    "Subconstruct",
+    "Switch",
+    "SwitchError",
+    "SymmetricMapping",
+    "Terminator",
+    "TerminatorError",
+    "Tunnel",
+    "TunnelAdapter",
+    "UBInt8",
+    "UBInt16",
+    "UBInt32",
+    "UBInt64",
+    "ULInt8",
+    "ULInt16",
+    "ULInt32",
+    "ULInt64",
+    "UNInt8",
+    "UNInt16",
+    "UNInt32",
+    "UNInt64",
+    "Union",
+    "ValidationError",
+    "Validator",
+    "Value",
+]

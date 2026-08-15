@@ -1,0 +1,35 @@
+# bmccore 配置模板 —— 拷贝为 bmccore.toml 放在core文件同级目录（或其上层目录）。
+# 编译服务器路径固定时配一次，日常使用只需: python3 bmccore.py analyze <core包>
+
+# 未strip编译产物根目录（递归扫描，可堆多版本，按build-id自动配对）
+artifact_dir = "/home/bmc/build/output"
+
+# 源码树根（报告贴崩溃行上下文）
+source_root = "/home/bmc/src/bmc-project"
+
+# 固件staging根文件系统（so路径兜底 + libc识别）
+sysroot = "/home/bmc/build/rootfs"
+
+# 报告输出目录（默认core文件旁的 bmccore_report/）
+# output = "/home/bmc/reports"
+# format = "both"    # md / json / both
+
+# ---- 工具链（不配则按架构自动探测 PATH）----
+# [toolchain.arm64]
+# prefix = "aarch64-linux-gnu-"
+# gdb = "/opt/toolchain/bin/aarch64-linux-gnu-gdb"      # 二选一：直接指定路径
+# addr2line = "/opt/toolchain/bin/aarch64-linux-gnu-addr2line"
+# objdump = "/opt/toolchain/bin/aarch64-linux-gnu-objdump"
+
+# [toolchain.arm32]
+# prefix = "arm-linux-gnueabihf-"
+
+# [toolchain.riscv64]
+# prefix = "riscv64-linux-gnu-"
+
+# ---- 手动指定某模块产物（自动配对失败时的逃生门）----
+# [module]
+# libfoo.so = "/home/bmc/build/output/lib/libfoo.so.1.2"
+
+# 栈扫描最大深度（字节）
+# max_scan_depth = 65536
