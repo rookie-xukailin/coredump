@@ -241,9 +241,13 @@ def find_libc(matches):
 # 技能入口
 # ---------------------------------------------------------------------------
 
-def run_heap_skill(core, threads, matches, victim_addr=None, ref_radius=64):
-    """堆取证主流程。victim_addr 可选（由 triage 或调用方指定受害地址）。"""
+def run_heap_skill(core, threads, matches, victim_addr=None, ref_radius=64,
+                   reg_ptrs=None):
+    """堆取证主流程。victim_addr 可选（由 triage 或调用方指定受害地址）；
+    reg_ptrs 可选（崩溃线程寄存器值列表）：堆头完好但数据被踩（延迟引爆）
+    的形态下，用指向堆的寄存器定位受害对象做内容指纹与引用搜索。"""
     res = HeapResult()
+    res.victim_probe = None          # 堆头完好时的受害对象探测结论（供 triage）
     heaps = find_heap_regions(core, threads)
     if not heaps:
         res.notes.append("core 中没有匿名读写段（堆未被转储或进程无堆），堆取证不可用")
@@ -257,11 +261,21 @@ def run_heap_skill(core, threads, matches, victim_addr=None, ref_radius=64):
             res.notes.append("glibc 版本 %s（来自 %s）" % (glibc_ver, libc_path))
 
     first_corrupt_region = None
+    walked = []                      # (region, chunks, desc)
     for r in heaps:
         desc = "0x%x-0x%x" % (r.vaddr, r.vaddr + r.filesz)
         chunks, corrs, notes = walk_region(r, core.elfclass)
-        res.regions.append((desc, chunks))
         res.notes.extend(notes)
+        # 堆区资格判定：glibc 堆起点必是合法 chunk 链。若起点第一个 chunk
+        # 头就非法（BSS/数据残留等非堆内存的典型特征），不能按堆损坏上报，
+        # 否则每个 core 都会误报。链走到一半断掉（前面已有合法 chunk）才可信。
+        if corrs and not chunks:
+            res.notes.append("区域 %s 起点即非法 chunk 头，按非堆数据跳过" % desc)
+            continue
+        if not chunks:
+            continue
+        res.regions.append((desc, chunks))
+        walked.append((r, chunks, desc))
         if corrs and res.corruptions == []:
             first_corrupt_region = (r, chunks, corrs, desc)
 
@@ -294,4 +308,48 @@ def run_heap_skill(core, threads, matches, victim_addr=None, ref_radius=64):
         refs = searchref(core, target[0], target[1])
         for where, v in refs:
             res.references.append((describe_addr(core, where, threads), where, v))
+
+    # ---- 堆头完好的"数据被踩"形态：按崩溃寄存器定位受害对象 ----
+    # chunk 头未被破坏时走查无异常，但崩溃现场寄存器（如对象指针）指向的
+    # 堆块往往就是受害对象：块头内容=身份指纹，块尾内容=踩写痕迹指纹。
+    if not res.corruptions and reg_ptrs:
+        seen = set()
+        for p in reg_ptrs:
+            if not isinstance(p, int) or p in seen:
+                continue
+            seen.add(p)
+            for r, chunks, desc in walked:
+                c, coff = probe(chunks, p, r.vaddr)
+                if c is None:
+                    continue
+                idx = chunks.index(c)
+                prev_sz = chunks[idx - 1].size if idx > 0 else 0
+                poff = p - r.vaddr                   # 指针在区域内偏移
+                head32 = r.data[poff: poff + 32]
+                tail32 = r.data[c.offset + c.size - 32: c.offset + c.size] \
+                    if c.size >= 32 else b""
+                fp_h = fingerprint(head32)
+                fp_t = fingerprint(tail32)
+                res.notes.append(
+                    "堆头完好：走查无 chunk 损坏，属'数据被踩而非越界写穿头'形态；"
+                    "崩溃寄存器指向堆块 %s+0x%x（%d字节, 块内+0x%x, %s）——疑似受害对象，"
+                    "相邻块(%d字节)/前块为重点嫌疑" % (
+                        desc, c.offset, c.size, coff,
+                        "in-use" if c.inuse else "free", prev_sz))
+                if fp_h:
+                    res.fingerprints.append(Fingerprint(
+                        "受害对象块头32字节(身份): %s" % fp_h.desc, fp_h.kind))
+                if fp_t and fp_t.kind in ("pattern", "ascii", "magic"):
+                    res.fingerprints.append(Fingerprint(
+                        "受害对象块尾32字节(踩写痕迹): %s" % fp_t.desc, fp_t.kind))
+                    res.victim_probe = (
+                        "疑似堆数据被踩（堆头完好）：受害对象在 %s+0x%x（块内+0x%x），"
+                        "块尾被写入 %s ——相邻块溢出/悬垂写重点嫌疑，"
+                        "指纹拿去源码 grep" % (desc, c.offset, coff, fp_t.desc))
+                refs = searchref(core, p, p + 64)
+                for where, v in refs[:8]:
+                    res.references.append((describe_addr(core, where, threads), where, v))
+                break
+            if res.victim_probe:
+                break
     return res
