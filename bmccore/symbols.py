@@ -65,14 +65,19 @@ def read_artifact_info(path):
                     break
             soname = None
             if elf.header.e_type == "ET_DYN":
-                for sec in elf.iter_sections():
-                    if sec.header.sh_type == "SHT_DYNAMIC":
-                        for t, v in sec.iter_tags():
-                            if t == "DT_SONAME":
-                                soname = v.soname
-                                break
-                    if soname:
-                        break
+                # iter_tags() 产出 DynamicTag 对象（.entry.d_tag / .soname 属性），
+                # 不能按二元组解包。soname 解析失败不影响 build-id 已到手的信息。
+                try:
+                    for sec in elf.iter_sections():
+                        if sec.header.sh_type == "SHT_DYNAMIC":
+                            for tag in sec.iter_tags():
+                                if tag.entry.d_tag == "DT_SONAME":
+                                    soname = tag.soname
+                                    break
+                        if soname:
+                            break
+                except Exception:
+                    soname = None
             machine = elf.header["e_machine"]
             if isinstance(machine, str):
                 machine = {"EM_ARM": 40, "EM_AARCH64": 183, "EM_RISCV": 243,
