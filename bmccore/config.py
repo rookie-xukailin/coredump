@@ -29,22 +29,27 @@ def _parse_scalar(s):
 
 
 def load_toml(path):
-    """解析 toml 子集，返回 {section: {key: value}}；顶层键放 '' 节。"""
+    """解析 toml 子集，返回 {section: {key: value}}；顶层键放 '' 节。
+
+    支持点分节名（[toolchain.arm64] -> 嵌套 dict），bmccore.toml.example
+    用的就是这种写法。
+    """
     out = {"": {}}
-    section = ""
+    cur = out[""]
     with io.open(path, "r", encoding="utf-8") as f:
         for ln, line in enumerate(f, 1):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
             if line.startswith("[") and line.endswith("]"):
-                section = line[1:-1].strip()
-                out.setdefault(section, {})
+                cur = out
+                for part in line[1:-1].strip().split("."):
+                    cur = cur.setdefault(part, {})
                 continue
             if "=" not in line:
                 raise ConfigError("%s:%d 无法解析: %r" % (path, ln, line))
             key, _, val = line.partition("=")
-            out[section][key.strip()] = _parse_scalar(val)
+            cur[key.strip()] = _parse_scalar(val)
     return out
 
 
