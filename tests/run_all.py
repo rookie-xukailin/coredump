@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
 MODULES = ["test_corefile", "test_intake", "test_scan_heap", "test_e2e",
-           "test_system_matrix"]
+           "test_system_matrix", "test_py38_compat"]
 
 
 def main():
