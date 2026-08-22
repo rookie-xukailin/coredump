@@ -187,10 +187,47 @@ class CoreFile(object):
                 self.file_mappings = self._parse_nt_file(desc, endian)
 
     # ------------------------------------------------------------------
+    def _prstatus_regs_off(self, desc):
+        """推断 prstatus 寄存器区偏移。
+
+        内核布局：64位=112（timeval 按 2*long），32位=72。
+        gdb gcore 另有变体：riscv64 紧凑头=80（无 fpvalid 字段）。
+        按 desc 总长筛出尺寸适配的候选，再用"pc/sp 非零"的合理性打分：
+        崩溃线程的 pc 不会是 0，偏移错位时首若干寄存器必读到 0。
+        """
+        regnames = self.arch.regnames
+        regbytes = len(regnames) * self.arch.word
+        fmt = "%s%d%s" % ("<" if self.little_endian else ">",
+                          len(regnames), "I" if self.elfclass == 32 else "Q")
+
+        def fits(cand):
+            end4 = cand + regbytes + 4          # 含 pr_fpvalid
+            end0 = cand + regbytes              # 不含
+            return (end4 <= len(desc) and len(desc) - end4 <= 8) or end0 == len(desc)
+
+        def plausible(cand):
+            raw = struct.unpack_from(fmt, desc, cand)
+            pc = raw[0]                          # 三架构 regnames[0] 均为 pc
+            sp = raw[regnames.index("sp")]
+            return pc != 0 and sp != 0
+
+        cands = [c for c in (112, 80, 72, 24) if fits(c)]
+        for c in cands:
+            if plausible(c):
+                return c
+        if cands:
+            return cands[0]
+        for c in (112, 80, 72, 24):
+            if c + regbytes <= len(desc):
+                return c
+        return _PRSTATUS_REGS_OFF[self.elfclass]
+
     def _parse_prstatus(self, desc, endian):
-        regs_off = _PRSTATUS_REGS_OFF[self.elfclass]
+        regs_off = self._prstatus_regs_off(desc)
         # siginfo 三字段按无符号读仅作参考，权威信号取 pr_cursig / NT_SIGINFO
         signo, _pad, _code, cursig = struct.unpack_from(endian + "IIIh", desc, 0)
+        # pid 偏移按 elfclass：64位头部（含 gdb 的 riscv64 紧凑头）pid@32，
+        # 32位头部 pid@24。
         if self.elfclass == 64:
             pid, ppid = struct.unpack_from(endian + "ii", desc, 32)
         else:
@@ -216,16 +253,20 @@ class CoreFile(object):
         def printable(b):
             return all(0x20 <= c < 0x7F or c == 0 for c in b) and any(0x20 <= c < 0x7F for c in b)
 
-        # 先启发式扫描（16字节可打印块 + 紧跟80字节可打印块 = fname+psargs），
-        # 不中再退回常见内核固定布局（uid 字段个数随内核版本有差异）。
+        # 先启发式扫描（16字节可打印块 + 紧跟80字节可打印块 = fname+psargs）。
+        # 取"最后一个"命中：fname 前的 pid/uid 区大量 0 混少量可打印字节时，
+        # 过早命中会把边界前移 8~16 字节导致 fname/psargs 错位；真正的 fname
+        # 起点同样满足校验且必更靠后（其后不足 96 字节可命中），取最后即正确。
+        hit_off = None
         for off in range(0, max(len(desc) - 95, 0), 4):
             if printable(desc[off:off + 16]) and printable(desc[off + 16:off + 96]):
                 cand_fname = desc[off:off + 16].rstrip(b"\x00").decode("ascii", "replace")
-                cand_psargs = desc[off + 16:off + 96].rstrip(b"\x00").decode("ascii", "replace")
-                if len(cand_fname) >= 3:
-                    info["fname"] = cand_fname
-                    info["psargs"] = cand_psargs
-                    return info
+                if len(cand_fname.strip("\x00 ")) >= 3:
+                    hit_off = off
+        if hit_off is not None:
+            info["fname"] = desc[hit_off:hit_off + 16].rstrip(b"\x00").decode("ascii", "replace")
+            info["psargs"] = desc[hit_off + 16:hit_off + 96].rstrip(b"\x00").decode("ascii", "replace")
+            return info
         for fo, po in ([(48, 64), (40, 56)] if self.elfclass == 64
                        else [(32, 48), (40, 56), (28, 44)]):
             try:
