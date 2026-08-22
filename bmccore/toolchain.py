@@ -51,10 +51,17 @@ def discover(arch_name, config=None):
         p = os.path.expanduser(str(p))
         if os.path.isfile(p):
             tools[t] = p
+        else:
+            w = _which(p)          # 允许直接写命令名（如 gdb = "gdb-multiarch"）
+            if w:
+                tools[t] = w
     if tc_cfg.get("prefix"):
+        pfx = tc_cfg["prefix"]
+        if pfx.endswith("-"):        # 配置里常见带尾横线的 triple 前缀
+            pfx = pfx[:-1]
         for t in _TOOLS:
             if not tools[t]:
-                cand = "%s-%s" % (tc_cfg["prefix"], t)
+                cand = "%s-%s" % (pfx, t)
                 w = _which(cand)
                 if w:
                     tools[t] = w
