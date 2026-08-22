@@ -288,8 +288,9 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
         lines += ["| 栈偏移 | 值 | 置信度 | 函数/位置 | 判定 |", "|---|---|---|---|---|"]
         for f in sr.frames:
             loc = f.loc or (f.func or "")
-            lines.append("| SP+0x%x | 0x%x | %s | %s | %s |" % (
-                f.stack_off, f.value, f.confidence, loc, f.why))
+            off_txt = "LR/ra寄存器" if f.stack_off < 0 else "SP+0x%x" % f.stack_off
+            lines.append("| %s | 0x%x | %s | %s | %s |" % (
+                off_txt, f.value, f.confidence, loc, f.why))
         for note in sr.notes:
             lines.append("")
             lines.append("> %s" % note)

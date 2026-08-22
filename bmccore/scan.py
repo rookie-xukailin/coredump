@@ -134,6 +134,45 @@ def scan_thread(core, arch, thread, matches, resolver=None, max_depth=65536,
     exec_mods = [m for m in matches if m.artifact or True]  # 全部模块都参与区间判断
 
     pending_a2l = []   # (artifact_path, module_base, addr)
+
+    def _try_frame(cand, raw_v, stack_off, note):
+        """按栈上候选同规则验证一个返回地址候选，通过则入帧。
+        raw_v 保留原始值（ARM32 Thumb bit0=1 供指令集判定），cand 为剥位后的候选。"""
+        if cand == 0 or not _code_addr_exec(core, cand):
+            return None
+        m = _find_module(exec_mods, cand)
+        if m is None:
+            return None
+        prev8 = None
+        if m.artifact:
+            prev8 = read_artifact_text(m.artifact.path, cand - m.module.base - 8, 8)
+        if prev8 is None:
+            prev8 = core.read_mem(cand - 8, 8)
+        if prev8 is None:
+            ok, why = True, note + ",指令字节不可得,仅按代码区间命中"
+            conf = "未验证"
+        else:
+            ok, why = arch.is_call_before(prev8, cand, raw_v)
+            why = note + "," + why
+            conf = "确认"
+        if not ok:
+            return None
+        frame = ScanFrame(stack_off, raw_v, conf, why, module=m.module.name)
+        if resolver and m.artifact:
+            func = resolver.lookup(m.artifact.path, cand, m.module.base)
+            if func:
+                frame.func = func
+        if m.artifact:
+            pending_a2l.append((m.artifact.path, m.module.base, cand))
+        res.frames.append(frame)
+        return frame
+
+    # LR/ra 寄存器候选：bt 断链（pc 为野地址）时，返回地址往往仍躺在
+    # 链接寄存器里——栈上扫不到，但它是恢复"谁调用了崩溃点"的最后线索
+    lr = thread.lr
+    if lr:
+        _try_frame(lr, lr, -1, "LR/ra寄存器(现场)")
+
     n_words = len(data) // word
     fmt = "<%d%s" % (n_words, "I" if word == 4 else "Q")
     values = struct.unpack(fmt, data[: n_words * word])
@@ -150,30 +189,7 @@ def scan_thread(core, arch, thread, matches, resolver=None, max_depth=65536,
         if not _code_addr_exec(core, cand) and m.artifact is None:
             # 无产物也无 core 代码段佐证，纯数值碰撞，丢弃
             continue
-
-        # call 指令验证：优先产物 .text，退回 core 内存
-        prev8 = None
-        if m.artifact:
-            prev8 = read_artifact_text(m.artifact.path, cand - m.module.base - 8, 8)
-        if prev8 is None:
-            prev8 = core.read_mem(cand - 8, 8)
-        if prev8 is None:
-            ok, why = True, "指令字节不可得,仅按代码区间命中"
-            conf = "未验证"
-        else:
-            ok, why = arch.is_call_before(prev8, cand, v)
-            conf = "确认"
-        if not ok:
-            continue
-
-        frame = ScanFrame(i * word, v, conf, why, module=m.module.name)
-        if resolver and m.artifact:
-            func = resolver.lookup(m.artifact.path, cand, m.module.base)
-            if func:
-                frame.func = func
-        if m.artifact:
-            pending_a2l.append((m.artifact.path, m.module.base, cand))
-        res.frames.append(frame)
+        _try_frame(cand, v, i * word, "")
 
     # 可选行号叠加（批量 addr2line；注意 addr2line 按产物内相对地址回显，
     # 查表时要用 绝对地址-基址 还原成同样的键）
