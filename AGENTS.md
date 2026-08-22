@@ -22,7 +22,7 @@ python tests/run_all.py          # 系统套件将进程内驱动完整分析流
 
 ## 1.5 Python 版本基线
 
-- **Python 3.8+**（真实编译服务器环境）：新增代码不得引入 3.9+ 语法/API
+- **Python 3.8+**（真实编译服务器环境；已实测 3.8.18 / 3.12.3 / 3.13.5）：新增代码不得引入 3.9+ 语法/API
   （`tests/test_py38_compat.py` 静态门禁拦截；vendored pyelftools 固定 0.31.x，
   升级前必须在真实 3.8 解释器上重跑全量测试）。
 
