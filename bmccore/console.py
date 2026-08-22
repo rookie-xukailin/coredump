@@ -11,6 +11,7 @@ _PATTERNS = [
     re.compile(r"double free|corruption|corrupted", re.I),
     re.compile(r"invalid pointer|invalid size|unaligned", re.I),
     re.compile(r"stack smashing detected", re.I),
+    re.compile(r"buffer overflow detected|overflow detected", re.I),
     re.compile(r"Segmentation fault|SIGSEGV|Aborted|SIGABRT", re.I),
     re.compile(r"assert", re.I),
     re.compile(r"out of memory|OOM|Cannot allocate", re.I),

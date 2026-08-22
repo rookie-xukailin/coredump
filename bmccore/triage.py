@@ -92,6 +92,12 @@ def triage(core, matches, console_hits=None, scan_result=None, heap_result=None)
             matched = None
             for _ln, line in console_hits[:5]:
                 low = line.lower()
+                if "buffer overflow detected" in low or "overflow detected" in low:
+                    matched = Conclusion(
+                        "glibc 加固检查(_FORTIFY_SOURCE)触发 abort：%s —— 拷贝长度"
+                        "越过目标缓冲，检查崩溃帧的 *_chk 调用点" % line.strip(),
+                        "确认", "console日志")
+                    break
                 if any(k in low for k in ("malloc", "free", "corrupt", "invalid",
                                           "smashing", "unaligned", "munmap")):
                     matched = Conclusion("glibc 堆检查触发 abort：%s" % line.strip(),
