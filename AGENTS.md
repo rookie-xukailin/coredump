@@ -15,9 +15,9 @@ export BMCCORE_SYSTEM_WORK=<工作目录>   # 布局见 tests/test_system_matrix
 python tests/run_all.py          # 系统套件将进程内驱动完整分析流水线逐格断言
 ```
 
-- 系统测试当前基线：**98 PASS / 0 FAIL / 1 SKIP**
-  （SKIP = lmdb_truncate_bus.arm64，qemu internal SIGBUS 环境限制，见
-  `tests/system_manifest.py` 的 EXPECT_ARCH 注释）。任何新增 FAIL 都不许提交。
+- 系统测试当前基线（**编译级别 -g -O1，与真实固件一致**）：**97 PASS / 0 FAIL / 2 SKIP**
+  （SKIP = lmdb_truncate_bus 的 arm64/arm32，qemu SIGBUS 交付不稳，见
+  `tests/system_manifest.py` 的 EXPECT_ARCH 注释）。任何新增 FAIL 都许不许提交。
 - 修改只影响纯文档/注释时，① 必须跑；② 建议跑。
 
 ## 2. 提交规约
@@ -50,6 +50,9 @@ python tests/run_all.py          # 系统套件将进程内驱动完整分析流
   - 保真处理：NT_SIGINFO 按当次 gdb 停止信号注入；riscv 的 gcore PRSTATUS
     需扩容到 376 字节（gdb 只认该尺寸）；文件中部插字节须同步平移节头表。
   - 生成/分析脚本与全部产物在仓库外部工作目录（不入库）。
+- **编译基线 `-g -O1`（真实固件级别，不加帧指针）**：案例源码经抗优化处理
+  （volatile 汇/noinline 定帧），杜绝 -O1 的死存储消除/常量折叠/尾调用把
+  缺陷机制"合法拆弹"；早期 -O0 产物归档于工作目录 cores_O0/ 供对照。
 
 ## 4. 已知环境限制（如实记录，不许静默绕过）
 
