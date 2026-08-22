@@ -101,8 +101,13 @@ class Pipeline(object):
         # ---- 3. 栈扫描兜底 ----
         scan_results = {}      # tid -> ScanResult
         if "scan" in want:
-            threads = [core.crash_thread] if (cfg.crash_thread_only and core.crash_thread) \
-                else [t for t in core.threads if core.region_of(t.sp)]
+            # 崩溃线程必须参与扫描（即使 SP 已落在任何转储段之外——
+            # 那正是 scan_thread 里"栈溢出或 SP 已被破坏"判定的目标形态，
+            # 不能在此被过滤掉）；其余线程按栈是否转储过滤。
+            threads = [t for t in core.threads
+                       if t is core.crash_thread or core.region_of(t.sp)]
+            if cfg.crash_thread_only and core.crash_thread:
+                threads = [core.crash_thread]
             # 始终扫描（即使 GDB 回溯完整，也作为交叉验证）
             a2l = None
             if tchain.has("addr2line"):
@@ -120,8 +125,18 @@ class Pipeline(object):
         heap_result = None
         if "heap" in want:
             victim = (core.siginfo or {}).get("addr")
+            # 崩溃线程寄存器值（剔除 pc/sp 等）：堆头完好时用于定位受害对象
+            reg_ptrs = []
+            if core.crash_thread and core.arch:
+                skip = {core.arch.reg_pc, core.arch.reg_sp, "pstate", "cpsr",
+                        "orig_r0", "fpcsr", "fpcr"}
+                for k, v in core.crash_thread.regs.items():
+                    if k in skip:
+                        continue
+                    reg_ptrs.append(v)
             heap_result = heap_mod.run_heap_skill(core, core.threads, matches,
-                                                  victim_addr=victim)
+                                                  victim_addr=victim,
+                                                  reg_ptrs=reg_ptrs)
             self._mark("heap", "ok" if heap_result.has_heap else "skipped",
                        "" if heap_result.has_heap else "core 中无堆数据")
 
@@ -158,7 +173,7 @@ class Pipeline(object):
                                 wanted.append((f, int(ln)))
             crash_scan = scan_results.get(core.crash_thread.tid) if core.crash_thread else None
             if crash_scan:
-                for fr in crash_scan.frames[:6]:
+                for fr in crash_scan.frames[:12]:
                     if fr.loc and ":" in fr.loc:
                         f, _, ln = fr.loc.rpartition(":")
                         if ln.isdigit():
