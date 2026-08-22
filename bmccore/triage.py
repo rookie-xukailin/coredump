@@ -88,14 +88,23 @@ def triage(core, matches, console_hits=None, scan_result=None, heap_result=None)
         txt += "（对齐错误居多）"
         out.append(Conclusion(txt, "确认", "NT_SIGINFO"))
     elif sig == 6:
-        txt = "进程主动 abort"
         if console_hits:
+            matched = None
             for _ln, line in console_hits[:5]:
-                if any(k in line.lower() for k in ("malloc", "free", "corrupt",
-                                                   "invalid", "smashing")):
-                    out.append(Conclusion("glibc 堆检查触发 abort：%s" % line.strip(),
-                                          "确认", "console日志"))
+                low = line.lower()
+                if any(k in low for k in ("malloc", "free", "corrupt", "invalid",
+                                          "smashing", "unaligned", "munmap")):
+                    matched = Conclusion("glibc 堆检查触发 abort：%s" % line.strip(),
+                                         "确认", "console日志")
                     break
+                if "assert" in low:
+                    matched = Conclusion("断言失败触发 abort：%s" % line.strip(),
+                                         "确认", "console日志")
+                    break
+            if matched is None:
+                matched = Conclusion("进程主动 abort（console 日志未见 glibc 堆/assert 特征）",
+                                     "确认", "信号")
+            out.append(matched)
         else:
             out.append(Conclusion("SIGABRT：多为 glibc 堆检查/assert 触发（建议提供 console 日志）",
                                   "确认", "信号"))
@@ -107,6 +116,9 @@ def triage(core, matches, console_hits=None, scan_result=None, heap_result=None)
         out.append(Conclusion(scan_result.overflow, "疑似", "栈扫描"))
 
     # --- 堆取证结论 ---
+    if heap_result is not None and getattr(heap_result, "victim_probe", None):
+        out.append(Conclusion(heap_result.victim_probe, "疑似",
+                              "堆走查+崩溃寄存器定位"))
     if heap_result is not None and heap_result.corruptions:
         c = heap_result.corruptions[0]
         txt = ("glibc 堆损坏：区域 %s 偏移 0x%x 处 chunk 头异常(%s)，"
