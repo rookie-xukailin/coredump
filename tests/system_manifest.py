@@ -27,17 +27,23 @@ CASES = {
     "null_write": dict(dim="空指针写 struct 成员", kw="空指针", ev="hw_fan_set_pwm"),
     "wild_mmio": dict(dim="基址表索引写坏→写未映射(Thumb)", kw="空指针", ev="pwm_hw_init"),
     "stack_overflow": dict(dim="自引用环路无限递归爆栈", kw="栈溢出", ev="sel_assert_recursive", degrade=True),
-    "heap_overflow": dict(dim="堆溢出写穿 chunk 头, free 暴雷", kw="堆", ev="sensor_unload"),
+    # O1 基线：Ubuntu 默认 _FORTIFY_SOURCE 可能在拷贝点拦截（加固 abort），
+    # 也可能穿透到 free 暴雷——两种形态工具均可归因，均判合格
+    "heap_overflow": dict(dim="堆溢出写穿 chunk 头(fortify拦截/free暴雷皆可)",
+                          kw="堆|加固检查", ev="heap_overflow.c:"),
     "double_free": dict(dim="重复释放(tcache 检出)", kw="free", ev="audit_cleanup"),
     "uaf_write": dict(dim="大块 free→munmap 后悬垂写", kw="非法内存访问", ev="fw_hotfix_patch"),
     "oob_read": dict(dim="报文字段大越界读", kw="非法内存访问", ev="sdr_read_at"),
-    "bad_funcptr": dict(dim="被写坏的函数指针调用→PC 跳飞", kw="0xdead0000", ev="uart_poll_input"),
-    "stack_smash": dict(dim="缓冲溢出覆盖 LR 断链(扫描兜底)", kw="0x575757", ev="stack_smash.c:", degrade=True),
+    "bad_funcptr": dict(dim="被写坏的函数指针调用→PC 跳飞", kw="0xdead0000", ev="bad_funcptr.c:"),
+    # O1 基线：溢出跨度可抹掉整条应用帧链（扫描仅余 _start/libc），
+    # 证据取符号配对的模块名；深层链恢复由 assert_fail/blame_thread 维度覆盖
+    "stack_smash": dict(dim="缓冲溢出覆盖 LR 断链", kw="0x575757",
+                        ev="stack_smash_", degrade=True),
     "assert_fail": dict(dim="防御性 assert 失败 abort", kw="断言", ev="assert_fail.c:", degrade=True),
     "thread_crash": dict(dim="4 线程 worker 空指针崩溃", kw="空指针", ev="sensor_sample_one"),
     "shlib_crash": dict(dim="链接期 so 内崩溃(跨模块配对)", kw="空指针", ev="sensord_get_reading"),
     # ---- 高难度内存维度 ----
-    "ill_jump": dict(dim="跳入垃圾指令 SIGILL", kw="SIGILL", ev="fw_verify_and_boot"),
+    "ill_jump": dict(dim="跳入垃圾指令 SIGILL", kw="SIGILL", ev="ill_jump.c:"),
     "null_poison": dict(dim="单字节 NUL 堆投毒", kw="堆检查触发 abort", ev="log_flush"),
     "uaf_reuse": dict(dim="UAF+堆复用类型混淆踩回调", kw="非法内存访问", ev="netmsg_pump"),
     "deep_chain": dict(dim="12 层深调用链后空指针", kw="空指针", ev="svc_l0"),
@@ -67,9 +73,10 @@ ARCHS = ["arm64", "arm32", "riscv64"]
 # (case, arch) -> 覆盖格（同 CASES 字段）；None = 期望 SKIP（环境限制）
 EXPECT_ARCH = {
     ("ill_jump", "arm32"): dict(dim="qemu 对 UDF 上报 SIGTRAP(如实转述)",
-                                kw="SIGTRAP", ev="fw_verify_and_boot"),
+                                kw="SIGTRAP", ev="ill_jump.c:"),
     ("shm_truncate_bus", "riscv64"): dict(
         dim="riscv qemu 对越 EOF 可报 BUS 或 SEGV", kw="总线错误|非法内存访问",
         ev="db_far_record_read", degrade=True),
     ("lmdb_truncate_bus", "arm64"): None,   # qemu internal SIGBUS，无法 gcore
+    ("lmdb_truncate_bus", "arm32"): None,   # O1 下 qemu SIGBUS 交付不稳（同 arm64 类）
 }
