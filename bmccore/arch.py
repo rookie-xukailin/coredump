@@ -106,7 +106,8 @@ def _a64_is_call(prev8, addr, value):
 
 
 def _riscv_is_call(prev8, addr, value):
-    """RISC-V：JAL rd=x1/x5；JALR rd=x1/x5 且 rs1 非 x1/x5（排除 ret）；RVC c.jal(rv32)。"""
+    """RISC-V：JAL/JALR（rd=x1/x5）；RVC 压缩调用 c.jalr/c.jal。
+    -O1 固件经函数指针的调用几乎都编成 2 字节 c.jalr（紧贴返回地址）。"""
     if len(prev8) >= 8:
         w = _u32(prev8, 4)
         rd = (w >> 7) & 0x1F
@@ -119,7 +120,9 @@ def _riscv_is_call(prev8, addr, value):
                 return True, "RISCV JALR"
     if len(prev8) >= 2:
         hw = _u16(prev8, 6)
-        if (hw & 0xE003) == 0x2001:     # c.jal (仅 rv32 有)
+        if (hw & 0xF003) == 0x9002 and ((hw >> 7) & 0x1F) != 0:
+            return True, "RISCV c.jalr"          # 压缩间接调用 rd=ra 隐含
+        if (hw & 0xE003) == 0x2001:              # c.jal (仅 rv32 有)
             return True, "RISCV c.jal"
     return False, "RISCV但前指令不是call"
 
