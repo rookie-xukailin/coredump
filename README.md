@@ -25,6 +25,135 @@ python3 bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
 
 详见 [docs/使用说明.md](docs/使用说明.md)。
 
+## 傻瓜式使用指南（从零开始，照抄即可）
+
+下面按"第一次用"和"日常用"两个场景给出可直接复制的完整命令。
+假设：工具仓库在 `~/bmccore`，core 包拷到了 `~/cores/` 目录。
+
+### 场景 A：第一次用（一次性配置，约 3 分钟）
+
+**第 1 步：确认 Python 版本**（3.8 及以上都行）
+
+```bash
+python3 --version     # 输出 3.8.x / 3.9.x / ... / 3.13.x 均可
+```
+
+**第 2 步：确认交叉 gdb（可选，但强烈建议装）**
+
+```bash
+which aarch64-linux-gnu-gdb gdb-multiarch    # 有任意一个就行
+```
+
+- 都没有？`sudo apt install gdb-multiarch`（其他发行版同理）。
+- 实在没有也能跑：回溯技能会跳过，栈扫描兜底照常工作，只是报告
+  少一节精确回溯。
+
+**第 3 步：写配置文件**（放在 core 包所在的目录，或其任意上层目录）
+
+```bash
+cd ~/cores
+cp ~/bmccore/bmccore.toml.example bmccore.toml
+vi bmccore.toml      # 只需要改下面 3 行
+```
+
+必改的 3 行（其他行保持默认）：
+
+```toml
+# ① 未 strip 编译产物根目录：固件编译输出的存放处（递归扫描，可堆多版本）
+artifact_dir = "/home/bmc/build/output"
+
+# ② 源码树根：让报告贴出崩溃行前后 5 行源码（没有可不配）
+source_root = "/home/bmc/src/bmc-project"
+
+# ③ 固件根文件系统（staging 目录，so 路径兜底用；没有可不配）
+sysroot = "/home/bmc/build/rootfs"
+```
+
+工具链部分**不用改**——默认会自动探测 `aarch64-linux-gnu-gdb` 等常见
+前缀，找不到就用 `gdb-multiarch` 兜底。
+
+**完成。** 配置只需这一次，之后分析任何 core 都不用再动。
+
+### 场景 B：日常使用（每次崩溃，两条命令）
+
+**第 1 步：先看一眼摘要**（秒出，不解符号）
+
+```bash
+cd ~/cores
+python3 ~/bmccore/bmccore.py info 1_core-2078599821-remotexdp-6759.tar.gz
+```
+
+输出长这样（架构/信号/崩溃线程/已加载模块……）：
+
+```
+  架构        : arm64 (ELF64)
+  崩溃信号    : 11
+  出错地址    : 0x0
+  线程数      : 1
+  崩溃线程    : tid=6759 pc=0x7f08022e0728 sp=0x4000008006d0
+```
+
+**第 2 步：全量分析**（解符号+回溯+堆取证，一条命令出报告）
+
+```bash
+# 强烈建议带上串口日志：glibc 堆报错只打印在设备 stderr，core 里没有
+python3 ~/bmccore/bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz \
+    --console-log console.log
+```
+
+跑完会在 core 包旁边生成 `bmccore_report/` 目录，屏幕同时打印摘要：
+
+```
+  [确认] 空指针解引用：访问地址 0x0（空指针+0 偏移...）
+  技能 backtrace  ok
+  技能 heap       ok
+  ...
+  报告: ~/cores/bmccore_report/1_core-..._report.md    ← 打开这个文件
+```
+
+**第 3 步：读报告**（按顺序看三处，2 分钟定位）
+
+1. **"定位结论"表（报告最后）**：最终答案。每条带可信度——
+   `确认` = 有硬证据（信号/console/指令级验证），可直接信；
+   `疑似` = 强启发式推断，会注明依据。
+2. **"线程回溯"**：崩溃线程的调用栈（`#0` 是崩溃点，往上是谁调的），
+   带源码文件:行号。
+3. **"堆取证"（如有）**：内存被踩时看这里——损坏点位置、
+   **前一个 chunk 是重点嫌疑**、内容指纹（拿字符串去源码 grep 常直接
+   锁定肇事模块）。
+
+### 常见问题速查
+
+| 现象 | 原因 | 怎么办 |
+|---|---|---|
+| 回溯帧是 `??` 或没有行号 | 产物 strip 了或没编 `-g` | 确认 `artifact_dir` 里是**未 strip** 产物；行号要 `-g` 编译 |
+| 报告说某模块 `missing` | 产物目录里没这个 so | 把对应固件版本的完整产物放进 `artifact_dir`，或 `--module libfoo.so=/路径` 手动指定 |
+| 结论只有"崩溃信号 SIGABRT" | 没给串口日志 | 加 `--console-log`，assert/堆报错的原因都在里面 |
+| 堆取证说"core 中无堆数据" | 设备端 coredump_filter 裁了匿名段 | 检查 `/proc/<pid>/coredump_filter`（默认 0x33 即可） |
+| zstd 压缩包 | 标准库不支持 | 先 `zstd -d` 解开再喂给工具 |
+| 版本对不上怕用错符号 | — | 不用担心：工具按 build-id 精确配对，配不上会**明说**而不是猜 |
+
+### 命令速查
+
+```bash
+# 快速摘要（不解符号，秒出）
+python3 bmccore.py info <core文件或tar.gz包>
+
+# 全量分析（自动读同目录/上层的 bmccore.toml）
+python3 bmccore.py analyze <core> [--console-log console.log]
+
+# 手动指定产物/源码（不想写 toml 时）
+python3 bmccore.py analyze <core> --artifact-dir /产物目录 --source-root /源码树
+
+# 主程序配不上时强制指定
+python3 bmccore.py analyze <core> --exe /路径/主程序
+
+# 保留中间文件（gdb 脚本等，排障用）
+python3 bmccore.py analyze <core> --keep-temp
+```
+
+支持的全部参数：`python3 bmccore.py analyze --help`
+
 ## 依赖
 
 - **Python 3.8+**（基线 3.8，已在 3.8.18 / 3.12.3 / 3.13.5 实测（单测+CLI 全功能）；vendored pyelftools 固定 0.31.x，tests/test_py38_compat.py 静态防回退）
