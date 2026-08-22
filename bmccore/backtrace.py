@@ -9,7 +9,7 @@ from . import toolchain as tc
 
 _THREAD_HEAD = re.compile(r"^Thread (\d+) \(LWP (\d+)\):")
 _FRAME = re.compile(r"^#(\d+)\s+(?:0x([0-9a-f]+) in )?(.+)$")
-_FUNC_AT = re.compile(r"^(.*?)\s*\(\)\s+at\s+(.+?):(\d+)$")
+_FUNC_AT = re.compile(r"^(.*?)\s*\([^)]*\)\s+at\s+(.+?):(\d+)$")
 
 
 class Frame(object):
