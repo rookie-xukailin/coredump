@@ -106,9 +106,25 @@ def scan_thread(core, arch, thread, matches, resolver=None, max_depth=65536,
         res.overflow = ("栈溢出或 SP 已被破坏：SP=0x%x 不落在任何已转储的内存段内"
                         % sp)
         return res
-    if sp - region.vaddr < 512:
+    if sp - region.vaddr < 512 and region.write_bit:
         res.overflow = ("疑似栈溢出：SP=0x%x 距栈区底边界(0x%x)仅 %d 字节"
                         % (sp, region.vaddr, sp - region.vaddr))
+    elif not region.write_bit:
+        # SP 落进只读/不可写段：栈底保护页的典型形态。若其上方紧邻大块
+        # 可写段（栈本体），判定为向下生长越界（递归爆栈）。
+        guard_end = region.vaddr + region.memsz
+        above = None
+        for r2 in core.regions:
+            if r2.write_bit and r2.readable and 0 <= r2.vaddr - guard_end < 0x10000 \
+                    and r2.memsz >= 0x10000:
+                above = r2
+                break
+        if above is not None:
+            res.overflow = ("疑似栈溢出：SP=0x%x 落在栈区下方只读保护页"
+                            "(0x%x-0x%x)内，栈本体 0x%x-0x%x（向下越界 %d 字节）"
+                            % (sp, region.vaddr, guard_end, above.vaddr,
+                               above.vaddr + above.filesz,
+                               above.vaddr - sp))
 
     end = min(region.vaddr + region.filesz, sp + max_depth)
     start_off = sp - region.vaddr
@@ -159,21 +175,27 @@ def scan_thread(core, arch, thread, matches, resolver=None, max_depth=65536,
             pending_a2l.append((m.artifact.path, m.module.base, cand))
         res.frames.append(frame)
 
-    # 可选行号叠加（批量 addr2line）
+    # 可选行号叠加（批量 addr2line；注意 addr2line 按产物内相对地址回显，
+    # 查表时要用 绝对地址-基址 还原成同样的键）
     if addr2line:
         by_file = {}
         for path, base, cand in pending_a2l:
             by_file.setdefault((path, base), []).append(cand)
+        loc_by_abs = {}
         for (path, base), addrs in by_file.items():
             table = addr2line(path, addrs, base)
             if not table:
                 continue
-            for fr in res.frames:
-                hit = table.get(fr.value & ~1)
+            for a in addrs:
+                hit = table.get(a - base)
                 if hit:
-                    fr.loc = hit[1]
-                    if hit[0] and hit[0] != "??":
-                        fr.func = fr.func or hit[0]
+                    loc_by_abs[a] = hit
+        for fr in res.frames:
+            hit = loc_by_abs.get(fr.value & ~1)
+            if hit:
+                fr.loc = hit[1]
+                if hit[0] and hit[0] != "??":
+                    fr.func = fr.func or hit[0]
 
     # 递归检测
     if resolver:
