@@ -6,24 +6,13 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-from __future__ import annotations
-
-from typing import IO, TYPE_CHECKING, Any
-
-from ..common.utils import struct_parse
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    from ..construct.lib.container import Container
-    from .structs import DWARFStructs
+from ..common.utils import struct_parse, dwarf_assert
 
 
-class AbbrevTable:
+class AbbrevTable(object):
     """ Represents a DWARF abbreviation table.
     """
-    __slots__ = ('_abbrev_map', 'offset', 'stream', 'structs')
-    def __init__(self, structs: DWARFStructs, stream: IO[bytes], offset: int) -> None:
+    def __init__(self, structs, stream, offset):
         """ Create new abbreviation table. Parses the actual table from the
             stream and stores it internally.
 
@@ -40,20 +29,20 @@ class AbbrevTable:
 
         self._abbrev_map = self._parse_abbrev_table()
 
-    def get_abbrev(self, code: int) -> AbbrevDecl:
+    def get_abbrev(self, code):
         """ Get the AbbrevDecl for a given code. Raise KeyError if no
             declaration for this code exists.
         """
         return self._abbrev_map[code]
 
-    def _parse_abbrev_table(self) -> dict[int, AbbrevDecl]:
+    def _parse_abbrev_table(self):
         """ Parse the abbrev table from the stream
         """
-        map: dict[int, AbbrevDecl] = {}
+        map = {}
         self.stream.seek(self.offset)
         while True:
-            decl_code: int = struct_parse(
-                struct=self.structs.the_Dwarf_uleb128,
+            decl_code = struct_parse(
+                struct=self.structs.Dwarf_uleb128(''),
                 stream=self.stream)
             if decl_code == 0:
                 break
@@ -64,27 +53,27 @@ class AbbrevTable:
         return map
 
 
-class AbbrevDecl:
+class AbbrevDecl(object):
     """ Wraps a parsed abbreviation declaration, exposing its fields with
         dict-like access, and adding some convenience methods.
 
         The abbreviation declaration represents an "entry" that points to it.
     """
-    __slots__ = ('_has_children', 'code', 'decl')
-    def __init__(self, code: int, decl: Container) -> None:
+    def __init__(self, code, decl):
         self.code = code
         self.decl = decl
-        self._has_children = decl['children_flag'] == 'DW_CHILDREN_yes'
 
-    def has_children(self) -> bool:
-        return self._has_children
+    def has_children(self):
+        """ Does the entry have children?
+        """
+        return self['children_flag'] == 'DW_CHILDREN_yes'
 
-    def iter_attr_specs(self) -> Iterator[tuple[str, str]]:
+    def iter_attr_specs(self):
         """ Iterate over the attribute specifications for the entry. Yield
             (name, form) pairs.
         """
         for attr_spec in self['attr_spec']:
             yield attr_spec.name, attr_spec.form
 
-    def __getitem__(self, entry: str) -> Any:
+    def __getitem__(self, entry):
         return self.decl[entry]

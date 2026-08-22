@@ -6,44 +6,33 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-# Keep dict(...) constructs: their aligned, keyword-style enum definitions are
-# more readable than dict literals in this mapping-heavy file.
-# ruff: noqa: C408
-
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 from ..common.utils import merge_dicts
 from ..construct import Pass
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
 
 # e_ident[EI_CLASS] in the ELF header
-ENUM_EI_CLASS: Mapping[str, int] = dict(
+ENUM_EI_CLASS = dict(
     ELFCLASSNONE=0,
     ELFCLASS32=1,
     ELFCLASS64=2
 )
 
 # e_ident[EI_DATA] in the ELF header
-ENUM_EI_DATA: Mapping[str, int] = dict(
+ENUM_EI_DATA = dict(
     ELFDATANONE=0,
     ELFDATA2LSB=1,
     ELFDATA2MSB=2
 )
 
 # e_version in the ELF header
-ENUM_E_VERSION: Mapping[str, int] = dict(
+ENUM_E_VERSION = dict(
     EV_NONE=0,
     EV_CURRENT=1,
     _default_=Pass,
 )
 
 # e_ident[EI_OSABI] in the ELF header
-ENUM_EI_OSABI: Mapping[str, int] = dict(
+ENUM_EI_OSABI = dict(
     ELFOSABI_SYSV=0,
     ELFOSABI_HPUX=1,
     ELFOSABI_NETBSD=2,
@@ -70,7 +59,7 @@ ENUM_EI_OSABI: Mapping[str, int] = dict(
 )
 
 # e_type in the ELF header
-ENUM_E_TYPE: Mapping[str, int] = dict(
+ENUM_E_TYPE = dict(
     ET_NONE=0,
     ET_REL=1,
     ET_EXEC=2,
@@ -82,7 +71,7 @@ ENUM_E_TYPE: Mapping[str, int] = dict(
 )
 
 # e_machine in the ELF header
-ENUM_E_MACHINE: Mapping[str, int] = dict(
+ENUM_E_MACHINE = dict(
     EM_NONE          = 0,   # No machine
     EM_M32           = 1,   # AT&T WE 32100
     EM_SPARC         = 2,   # SPARC
@@ -289,7 +278,7 @@ ENUM_E_MACHINE: Mapping[str, int] = dict(
 # we later create per-processor dicts that use the LOPROC...HIPROC range to
 # define processor-specific values. The proper dict should be used based on the
 # machine the ELF header refers to.
-ENUM_SH_TYPE_BASE: Mapping[str, int] = dict(
+ENUM_SH_TYPE_BASE = dict(
     SHT_NULL=0,
     SHT_PROGBITS=1,
     SHT_SYMTAB=2,
@@ -329,11 +318,11 @@ ENUM_SH_TYPE_BASE: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_SH_TYPE_AMD64: Mapping[str, int] = merge_dicts(
+ENUM_SH_TYPE_AMD64 = merge_dicts(
         ENUM_SH_TYPE_BASE,
         dict(SHT_AMD64_UNWIND=0x70000001))
 
-ENUM_SH_TYPE_ARM: Mapping[str, int] = merge_dicts(
+ENUM_SH_TYPE_ARM = merge_dicts(
         ENUM_SH_TYPE_BASE,
         dict(
             SHT_ARM_EXIDX=0x70000001,
@@ -341,15 +330,11 @@ ENUM_SH_TYPE_ARM: Mapping[str, int] = merge_dicts(
             SHT_ARM_ATTRIBUTES=0x70000003,
             SHT_ARM_DEBUGOVERLAY=0x70000004))
 
-ENUM_SH_TYPE_AARCH64: Mapping[str, int] = merge_dicts(
-        ENUM_SH_TYPE_BASE,
-        dict(SHT_AARCH64_ATTRIBUTES=0x70000003))
-
-ENUM_SH_TYPE_RISCV: Mapping[str, int] = merge_dicts(
+ENUM_SH_TYPE_RISCV = merge_dicts(
         ENUM_SH_TYPE_BASE,
         dict(SHT_RISCV_ATTRIBUTES=0x70000003))
 
-ENUM_SH_TYPE_MIPS: Mapping[str, int] = merge_dicts(
+ENUM_SH_TYPE_MIPS = merge_dicts(
         ENUM_SH_TYPE_BASE,
         dict(
             SHT_MIPS_LIBLIST=0x70000000,
@@ -389,7 +374,7 @@ ENUM_SH_TYPE_MIPS: Mapping[str, int] = merge_dicts(
             SHT_MIPS_PDR_EXCEPTION=0x70000029,
             SHT_MIPS_ABIFLAGS=0x7000002a))
 
-ENUM_ELFCOMPRESS_TYPE: Mapping[str, int] = dict(
+ENUM_ELFCOMPRESS_TYPE = dict(
     ELFCOMPRESS_ZLIB=1,
     ELFCOMPRESS_LOOS=0x60000000,
     ELFCOMPRESS_HIOS=0x6fffffff,
@@ -402,7 +387,7 @@ ENUM_ELFCOMPRESS_TYPE: Mapping[str, int] = dict(
 # some values scavenged from the ELF headers in binutils-2.21
 #
 # Using the same base + per-processor augmentation technique as in sh_type.
-ENUM_P_TYPE_BASE: Mapping[str, int] = dict(
+ENUM_P_TYPE_BASE = dict(
     PT_NULL=0,
     PT_LOAD=1,
     PT_DYNAMIC=2,
@@ -426,28 +411,28 @@ ENUM_P_TYPE_BASE: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_P_TYPE_ARM: Mapping[str, int] = merge_dicts(
+ENUM_P_TYPE_ARM = merge_dicts(
         ENUM_P_TYPE_BASE,
         dict(
             PT_ARM_ARCHEXT=0x70000000,
             PT_ARM_EXIDX=0x70000001))
 
-ENUM_P_TYPE_AARCH64: Mapping[str, int] = merge_dicts(
+ENUM_P_TYPE_AARCH64 = merge_dicts(
         ENUM_P_TYPE_BASE,
         dict(
             PT_AARCH64_ARCHEXT=0x70000000,
             PT_AARCH64_UNWIND=0x70000001))
 
-ENUM_P_TYPE_MIPS: Mapping[str, int] = merge_dicts(
+ENUM_P_TYPE_MIPS = merge_dicts(
         ENUM_P_TYPE_BASE,
         dict(PT_MIPS_ABIFLAGS=0x70000003))
 
-ENUM_P_TYPE_RISCV: Mapping[str, int] = merge_dicts(
+ENUM_P_TYPE_RISCV = merge_dicts(
         ENUM_P_TYPE_BASE,
         dict(PT_RISCV_ATTRIBUTES=0x70000003))
 
 # st_info bindings in the symbol header
-ENUM_ST_INFO_BIND: Mapping[str, int] = dict(
+ENUM_ST_INFO_BIND = dict(
     STB_LOCAL=0,
     STB_GLOBAL=1,
     STB_WEAK=2,
@@ -460,7 +445,7 @@ ENUM_ST_INFO_BIND: Mapping[str, int] = dict(
 )
 
 # st_info type in the symbol header
-ENUM_ST_INFO_TYPE: Mapping[str, int] = dict(
+ENUM_ST_INFO_TYPE = dict(
     STT_NOTYPE=0,
     STT_OBJECT=1,
     STT_FUNC=2,
@@ -479,7 +464,7 @@ ENUM_ST_INFO_TYPE: Mapping[str, int] = dict(
 )
 
 # visibility from st_other
-ENUM_ST_VISIBILITY: Mapping[str, int] = dict(
+ENUM_ST_VISIBILITY = dict(
     STV_DEFAULT=0,
     STV_INTERNAL=1,
     STV_HIDDEN=2,
@@ -490,12 +475,12 @@ ENUM_ST_VISIBILITY: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_ST_LOCAL: Mapping[str, int] = dict(
+ENUM_ST_LOCAL = dict(
     _default_=Pass,
 )
 
 # st_shndx
-ENUM_ST_SHNDX: Mapping[str, int] = dict(
+ENUM_ST_SHNDX = dict(
     SHN_UNDEF=0,
     SHN_ABS=0xfff1,
     SHN_COMMON=0xfff2,
@@ -503,7 +488,7 @@ ENUM_ST_SHNDX: Mapping[str, int] = dict(
 )
 
 # d_tag
-ENUM_D_TAG_COMMON: Mapping[str, int] = dict(
+ENUM_D_TAG_COMMON = dict(
     DT_NULL=0,
     DT_NEEDED=1,
     DT_PLTRELSZ=2,
@@ -593,7 +578,7 @@ ENUM_D_TAG_COMMON: Mapping[str, int] = dict(
 # Above are the dynamic tags which are valid always.
 # Below are the dynamic tags which are only valid in certain contexts.
 
-ENUM_D_TAG_SOLARIS: Mapping[str, int] = dict(
+ENUM_D_TAG_SOLARIS = dict(
     DT_SUNW_AUXILIARY=0x6000000d,
     DT_SUNW_RTLDINF=0x6000000e,
     DT_SUNW_FILTER=0x6000000f,
@@ -614,7 +599,7 @@ ENUM_D_TAG_SOLARIS: Mapping[str, int] = dict(
     DT_SUNW_CAPCHAINSZ=0x6000001f,
 )
 
-ENUM_D_TAG_MIPS: Mapping[str, int] = dict(
+ENUM_D_TAG_MIPS = dict(
     DT_MIPS_RLD_VERSION=0x70000001,
     DT_MIPS_TIME_STAMP=0x70000002,
     DT_MIPS_ICHECKSUM=0x70000003,
@@ -632,10 +617,9 @@ ENUM_D_TAG_MIPS: Mapping[str, int] = dict(
     DT_MIPS_HIPAGENO=0x70000014,
     DT_MIPS_RLD_MAP=0x70000016,
     DT_MIPS_RLD_MAP_REL=0x70000035,
-    DT_MIPS_XHASH=0x70000036,
 )
 
-ENUM_D_TAG_AARCH64: Mapping[str, int] = dict(
+ENUM_D_TAG_AARCH64 = dict(
     DT_AARCH64_BTI_PLT=0x70000001,
 )
 
@@ -645,7 +629,7 @@ ENUM_D_TAG_AARCH64: Mapping[str, int] = dict(
 # TODO: add the rest of the machine-specific dynamic tags, not just mips and
 # solaris
 
-ENUMMAP_EXTRA_D_TAG_MACHINE: Mapping[str, Mapping[str, int]] = dict(
+ENUMMAP_EXTRA_D_TAG_MACHINE = dict(
     EM_MIPS=ENUM_D_TAG_MIPS,
     EM_MIPS_RS3_LE=ENUM_D_TAG_MIPS,
     EM_AARCH64=ENUM_D_TAG_AARCH64
@@ -653,13 +637,12 @@ ENUMMAP_EXTRA_D_TAG_MACHINE: Mapping[str, Mapping[str, int]] = dict(
 
 # Here is the full combined mapping from tag name to value
 
-ENUM_D_TAG = merge_dicts(
-    ENUM_D_TAG_COMMON,
-    ENUM_D_TAG_SOLARIS,
-    *ENUMMAP_EXTRA_D_TAG_MACHINE.values(),
-)
+ENUM_D_TAG = dict(ENUM_D_TAG_COMMON)
+ENUM_D_TAG.update(ENUM_D_TAG_SOLARIS)
+for k in ENUMMAP_EXTRA_D_TAG_MACHINE:
+    ENUM_D_TAG.update(ENUMMAP_EXTRA_D_TAG_MACHINE[k])
 
-ENUM_DT_FLAGS: Mapping[str, int] = dict(
+ENUM_DT_FLAGS = dict(
     DF_ORIGIN=0x1,
     DF_SYMBOLIC=0x2,
     DF_TEXTREL=0x4,
@@ -667,7 +650,7 @@ ENUM_DT_FLAGS: Mapping[str, int] = dict(
     DF_STATIC_TLS=0x10,
 )
 
-ENUM_DT_FLAGS_1: Mapping[str, int] = dict(
+ENUM_DT_FLAGS_1 = dict(
     DF_1_NOW=0x1,
     DF_1_GLOBAL=0x2,
     DF_1_GROUP=0x4,
@@ -698,7 +681,7 @@ ENUM_DT_FLAGS_1: Mapping[str, int] = dict(
     DF_1_PIE=0x8000000,
 )
 
-ENUM_RELOC_TYPE_MIPS: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_MIPS = dict(
     R_MIPS_NONE=0,
     R_MIPS_16=1,
     R_MIPS_32=2,
@@ -753,7 +736,7 @@ ENUM_RELOC_TYPE_MIPS: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_RELOC_TYPE_i386: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_i386 = dict(
     R_386_NONE=0,
     R_386_32=1,
     R_386_PC32=2,
@@ -800,7 +783,7 @@ ENUM_RELOC_TYPE_i386: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_RELOC_TYPE_x64: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_x64 = dict(
     R_X86_64_NONE=0,
     R_X86_64_64=1,
     R_X86_64_PC32=2,
@@ -843,7 +826,7 @@ ENUM_RELOC_TYPE_x64: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_RELOC_TYPE_BPF: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_BPF = dict(
     R_BPF_NONE=0,
     R_BPF_64_64=1,
     R_BPF_64_ABS64=2,
@@ -854,7 +837,7 @@ ENUM_RELOC_TYPE_BPF: Mapping[str, int] = dict(
 )
 
 # https://github.com/loongson/la-abi-specs/blob/release/laelf.adoc
-ENUM_RELOC_TYPE_LOONGARCH: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_LOONGARCH = dict(
     R_LARCH_NONE=0,
     R_LARCH_32=1,
     R_LARCH_64=2,
@@ -956,7 +939,7 @@ ENUM_RELOC_TYPE_LOONGARCH: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_RELOC_TYPE_S390X: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_S390X = dict(
     R_390_NONE=0,
     R_390_8=1,
     R_390_12=2,
@@ -1020,7 +1003,7 @@ ENUM_RELOC_TYPE_S390X: Mapping[str, int] = dict(
 )
 
 # Sunw Syminfo Bound To special values
-ENUM_SUNW_SYMINFO_BOUNDTO: Mapping[str, int] = dict(
+ENUM_SUNW_SYMINFO_BOUNDTO = dict(
     SYMINFO_BT_SELF=0xffff,
     SYMINFO_BT_PARENT=0xfffe,
     SYMINFO_BT_NONE=0xfffd,
@@ -1037,8 +1020,17 @@ ENUM_VERSYM = dict(
     _default_=Pass,
 )
 
+# Sunw Syminfo Bound To special values
+ENUM_SUNW_SYMINFO_BOUNDTO = dict(
+    SYMINFO_BT_SELF=0xffff,
+    SYMINFO_BT_PARENT=0xfffe,
+    SYMINFO_BT_NONE=0xfffd,
+    SYMINFO_BT_EXTERN=0xfffc,
+    _default_=Pass,
+)
+
 # PT_NOTE section types for all ELF types except ET_CORE
-ENUM_NOTE_N_TYPE: Mapping[str, int] = dict(
+ENUM_NOTE_N_TYPE = dict(
     NT_GNU_ABI_TAG=1,
     NT_GNU_HWCAP=2,
     NT_GNU_BUILD_ID=3,
@@ -1048,7 +1040,7 @@ ENUM_NOTE_N_TYPE: Mapping[str, int] = dict(
 )
 
 # PT_NOTE section types for ET_CORE
-ENUM_CORE_NOTE_N_TYPE: Mapping[str, int] = dict(
+ENUM_CORE_NOTE_N_TYPE = dict(
     NT_PRSTATUS=1,
     NT_FPREGSET=2,
     NT_PRPSINFO=3,
@@ -1060,7 +1052,7 @@ ENUM_CORE_NOTE_N_TYPE: Mapping[str, int] = dict(
 )
 
 # Values in GNU .note.ABI-tag notes (n_type=='NT_GNU_ABI_TAG')
-ENUM_NOTE_ABI_TAG_OS: Mapping[str, int] = dict(
+ENUM_NOTE_ABI_TAG_OS = dict(
     ELF_NOTE_OS_LINUX=0,
     ELF_NOTE_OS_GNU=1,
     ELF_NOTE_OS_SOLARIS2=2,
@@ -1071,7 +1063,7 @@ ENUM_NOTE_ABI_TAG_OS: Mapping[str, int] = dict(
 )
 
 # Values in GNU .note.gnu.property notes (n_type=='NT_GNU_PROPERTY_TYPE_0')
-ENUM_NOTE_GNU_PROPERTY_TYPE: Mapping[str, int] = dict(
+ENUM_NOTE_GNU_PROPERTY_TYPE = dict(
     GNU_PROPERTY_STACK_SIZE=1,
     GNU_PROPERTY_NO_COPY_ON_PROTECTED=2,
     GNU_PROPERTY_X86_FEATURE_1_AND=0xc0000002,
@@ -1082,7 +1074,7 @@ ENUM_NOTE_GNU_PROPERTY_TYPE: Mapping[str, int] = dict(
     _default_=Pass,
 )
 
-ENUM_GNU_PROPERTY_X86_FEATURE_1_FLAGS: Mapping[str, int] = dict(
+ENUM_GNU_PROPERTY_X86_FEATURE_1_FLAGS = dict(
     GNU_PROPERTY_X86_FEATURE_1_IBT=1,
     GNU_PROPERTY_X86_FEATURE_1_SHSTK=2,
     GNU_PROPERTY_X86_FEATURE_1_LAM_U48=4,
@@ -1090,7 +1082,7 @@ ENUM_GNU_PROPERTY_X86_FEATURE_1_FLAGS: Mapping[str, int] = dict(
     _default_=Pass
 )
 
-ENUM_RELOC_TYPE_ARM: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_ARM = dict(
     R_ARM_NONE=0,
     R_ARM_PC24=1,
     R_ARM_ABS32=2,
@@ -1222,7 +1214,7 @@ ENUM_RELOC_TYPE_ARM: Mapping[str, int] = dict(
     R_ARM_IRELATIVE=140,
 )
 
-ENUM_RELOC_TYPE_AARCH64: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_AARCH64 = dict(
     R_AARCH64_NONE=256,
     R_AARCH64_ABS64=257,
     R_AARCH64_ABS32=258,
@@ -1333,7 +1325,7 @@ ENUM_RELOC_TYPE_AARCH64: Mapping[str, int] = dict(
     R_AARCH64_TLS_TPREL32=1033,
 )
 
-ENUM_ATTR_TAG_ARM: Mapping[str, int] = dict(
+ENUM_ATTR_TAG_ARM = dict(
     TAG_FILE=1,
     TAG_SECTION=2,
     TAG_SYMBOL=3,
@@ -1386,23 +1378,18 @@ ENUM_ATTR_TAG_ARM: Mapping[str, int] = dict(
     TAG_PACRET_USE=76,
 )
 
-ENUM_ATTR_TAG_RISCV: Mapping[str, int] = dict(
+ENUM_ATTR_TAG_RISCV = dict(
     TAG_FILE=1,
     TAG_SECTION=2,
     TAG_SYMBOL=3,
     TAG_STACK_ALIGN=4,
     TAG_ARCH=5,
     TAG_UNALIGNED_ACCESS=6,
-    TAG_PRIV_SPEC=8,
-    TAG_PRIV_SPEC_MINOR=10,
-    TAG_PRIV_SPEC_REVISION=12,
-    TAG_ATOMIC_ABI=14,
-    TAG_X3_REG_USAGE=16,
 )
 
 # https://openpowerfoundation.org/wp-content/uploads/2016/03/ABI64BitOpenPOWERv1.1_16July2015_pub4.pdf
 # See 3.5.3 Relocation Types Table.
-ENUM_RELOC_TYPE_PPC64: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_PPC64 = dict(
     R_PPC64_NONE=0,
     R_PPC64_ADDR32=1,
     R_PPC64_ADDR24=2,
@@ -1527,66 +1514,8 @@ ENUM_RELOC_TYPE_PPC64: Mapping[str, int] = dict(
     R_PPC64_GNU_VTENTRY=254,
 )
 
-# https://example61560.files.wordpress.com/2016/11/powerpc_abi.pdf
-# See 4.13.5 Relocation Types Table.
-ENUM_RELOC_TYPE_PPC: Mapping[str, int] = dict(
-    R_PPC_NONE=0,
-    R_PPC_ADDR32=1,
-    R_PPC_ADDR24=2,
-    R_PPC_ADDR16=3,
-    R_PPC_ADDR16_LO=4,
-    R_PPC_ADDR16_HI=5,
-    R_PPC_ADDR16_HA=6,
-    R_PPC_ADDR14=7,
-    R_PPC_ADDR14_BRTAKEN=8,
-    R_PPC_ADDR14_BRNTAKEN=9,
-    R_PPC_REL24=10,
-    R_PPC_REL14=11,
-    R_PPC_REL14_BRTAKEN=12,
-    R_PPC_REL14_BRNTAKEN=13,
-    R_PPC_GOT16=14,
-    R_PPC_GOT16_LO=15,
-    R_PPC_GOT16_HI=16,
-    R_PPC_GOT16_HA=17,
-    R_PPC_PLTREL24=18,
-    R_PPC_COPY=19,
-    R_PPC_GLOB_DAT=20,
-    R_PPC_JMP_SLOT=21,
-    R_PPC_RELATIVE=22,
-    R_PPC_LOCAL24PC=23,
-    R_PPC_UADDR32=24,
-    R_PPC_UADDR16=25,
-    R_PPC_REL32=26,
-    R_PPC_PLT32=27,
-    R_PPC_PLTREL32=28,
-    R_PPC_PLT16_LO=29,
-    R_PPC_PLT16_HI=30,
-    R_PPC_PLT16_HA=31,
-    R_PPC_SECTOFF=33,
-    R_PPC_SECTOFF_LO=34,
-    R_PPC_SECTOFF_HI=35,
-    R_PPC_SECTOFF_HA=36,
-    R_PPC_ADDR30=37,
-    R_PPC_EMB_NADDR32=101,
-    R_PPC_EMB_NADDR16=102,
-    R_PPC_EMB_NADDR16_LO=103,
-    R_PPC_EMB_NADDR16_HI=104,
-    R_PPC_EMB_NADDR16_HA=105,
-    R_PPC_EMB_SDAI16=106,
-    R_PPC_EMB_SDA2I16=107,
-    R_PPC_EMB_SDA2REL=108,
-    R_PPC_EMB_SDA21=109,
-    R_PPC_EMB_MRKREF=110,
-    R_PPC_EMB_RELSEC16=111,
-    R_PPC_EMB_RELST_LO=112,
-    R_PPC_EMB_RELST_HI=113,
-    R_PPC_EMB_RELST_HA=114,
-    R_PPC_EMB_BIT_FLD=115,
-    R_PPC_EMB_RELSDA=116,
-)
-
 # https://gitlab.utu.fi/soft/binutils-gdb/-/blob/d18547d8b08615a58db18ad3e43f721dc92ae298/include/elf/v850.h
-ENUM_RELOC_TYPE_V850: Mapping[str, int] = dict(
+ENUM_RELOC_TYPE_V850 = dict(
     R_V800_NONE=0,
     R_V810_NONE=48,
     R_V810_BYTE=49,

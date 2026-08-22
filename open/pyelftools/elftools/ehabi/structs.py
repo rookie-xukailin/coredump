@@ -8,10 +8,10 @@
 # This code is in the public domain
 # -------------------------------------------------------------------------------
 
-from ..construct import Struct, UBInt32, ULInt32
+from ..construct import UBInt32, ULInt32, Struct
 
 
-class EHABIStructs:
+class EHABIStructs(object):
     """ Accessible attributes:
 
             EH_index_struct:
@@ -21,11 +21,11 @@ class EHABIStructs:
                 Struct of item in section .ARM.extab.
     """
 
-    def __init__(self, little_endian: bool) -> None:
+    def __init__(self, little_endian):
         self._little_endian = little_endian
         self._create_structs()
 
-    def _create_structs(self) -> None:
+    def _create_structs(self):
         if self._little_endian:
             self.EHABI_uint32 = ULInt32
         else:
@@ -33,14 +33,14 @@ class EHABIStructs:
         self._create_exception_handler_index()
         self._create_exception_handler_table()
 
-    def _create_exception_handler_index(self) -> None:
+    def _create_exception_handler_index(self):
         self.EH_index_struct = Struct(
             'EH_index',
             self.EHABI_uint32('word0'),
             self.EHABI_uint32('word1')
         )
 
-    def _create_exception_handler_table(self) -> None:
+    def _create_exception_handler_table(self):
         self.EH_table_struct = Struct(
             'EH_table',
             self.EHABI_uint32('word0'),

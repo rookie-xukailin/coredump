@@ -6,25 +6,10 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-from __future__ import annotations
-
-from struct import Struct
-from typing import IO, TYPE_CHECKING, Any, NoReturn
-
 from ..construct import (
-    ArrayError,
-    Construct,
-    ConstructError,
-    FieldError,
-    SizeofError,
-    StaticField,
-    Subconstruct,
-)
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-
-    from ..construct import Container
+    Subconstruct, ConstructError, ArrayError, Adapter, Field, RepeatUntil,
+    Rename, SizeofError, Construct
+    )
 
 
 class RepeatUntilExcluding(Subconstruct):
@@ -35,13 +20,13 @@ class RepeatUntilExcluding(Subconstruct):
 
         P.S. removed some code duplication
     """
-    __slots__ = ("predicate",)
-    def __init__(self, predicate: Callable[[Any, Container], bool], subcon: Construct) -> None:
+    __slots__ = ["predicate"]
+    def __init__(self, predicate, subcon):
         Subconstruct.__init__(self, subcon)
         self.predicate = predicate
         self._clear_flag(self.FLAG_COPY_CONTEXT)
         self._set_flag(self.FLAG_DYNAMIC)
-    def _parse(self, stream: IO[bytes], context: Container) -> list[Any]:
+    def _parse(self, stream, context):
         obj = []
         try:
             context_for_subcon = context
@@ -56,52 +41,56 @@ class RepeatUntilExcluding(Subconstruct):
         except ConstructError as ex:
             raise ArrayError("missing terminator", ex)
         return obj
-    def _build(self, obj: Iterable[Any], stream: IO[bytes], context: Container) -> NoReturn:
+    def _build(self, obj, stream, context):
         raise NotImplementedError('no building')
-    def _sizeof(self, context: Container) -> int:
+    def _sizeof(self, context):
         raise SizeofError("can't calculate size")
 
 
-class _NamedConstruct(Construct):
-    if TYPE_CHECKING:
-        name: str  # instead of `str|None` from Construct to save us from `is None` checks everywhere
-
-
-class ULEB128(_NamedConstruct):
-    """A construct based parser for ULEB128 encoding.
+def _LEB128_reader():
+    """ Read LEB128 variable-length data from the stream. The data is terminated
+        by a byte with 0 in its highest bit.
     """
-    def _parse(self, stream: IO[bytes], context: Container) -> int:
-        value = 0
-        shift = 0
-        while True:
-            data = stream.read(1)
-            if len(data) != 1:
-                raise FieldError("unexpected end of stream while parsing a ULEB128 encoded value")
-            b = data[0]
-            value |= (b & 0x7F) << shift
-            shift += 7
-            if b & 0x80 == 0:
-                return value
+    return RepeatUntil(
+                lambda obj, ctx: ord(obj) < 0x80,
+                Field(None, 1))
 
 
-class SLEB128(_NamedConstruct):
-    """A construct based parser for SLEB128 encoding.
+class _ULEB128Adapter(Adapter):
+    """ An adapter for ULEB128, given a sequence of bytes in a sub-construct.
     """
-    def _parse(self, stream: IO[bytes], context: Container) -> int:
+    def _decode(self, obj, context):
         value = 0
-        shift = 0
-        while True:
-            data = stream.read(1)
-            if len(data) != 1:
-                raise FieldError("unexpected end of stream while parsing a SLEB128 encoded value")
-            b = data[0]
-            value |= (b & 0x7F) << shift
-            shift += 7
-            if b & 0x80 == 0:
-                return value | (~0 << shift) if b & 0x40 else value
+        for b in reversed(obj):
+            value = (value << 7) + (ord(b) & 0x7F)
+        return value
 
 
-class StreamOffset(_NamedConstruct):
+class _SLEB128Adapter(Adapter):
+    """ An adapter for SLEB128, given a sequence of bytes in a sub-construct.
+    """
+    def _decode(self, obj, context):
+        value = 0
+        for b in reversed(obj):
+            value = (value << 7) + (ord(b) & 0x7F)
+        if ord(obj[-1]) & 0x40:
+            # negative -> sign extend
+            value |= - (1 << (7 * len(obj)))
+        return value
+
+
+def ULEB128(name):
+    """ A construct creator for ULEB128 encoding.
+    """
+    return Rename(name, _ULEB128Adapter(_LEB128_reader()))
+
+
+def SLEB128(name):
+    """ A construct creator for SLEB128 encoding.
+    """
+    return Rename(name, _SLEB128Adapter(_LEB128_reader()))
+
+class StreamOffset(Construct):
     """
     Captures the current stream offset
 
@@ -111,40 +100,13 @@ class StreamOffset(_NamedConstruct):
     Example:
     StreamOffset("item_offset")
     """
-    __slots__ = ()
-    def __init__(self, name: str) -> None:
+    __slots__ = []
+    def __init__(self, name):
         Construct.__init__(self, name)
         self._set_flag(self.FLAG_DYNAMIC)
-    def _parse(self, stream: IO[bytes], context: Container) -> int:
+    def _parse(self, stream, context):
         return stream.tell()
-    def _build(self, obj: None, stream: IO[bytes], context: Container) -> None:
+    def _build(self, obj, stream, context):
         context[self.name] = stream.tell()
-    def _sizeof(self, context: Container) -> int:
+    def _sizeof(self, context):
         return 0
-
-_UBInt24_packer = Struct(">BH")
-_ULInt24_packer = Struct("<HB")
-
-class UBInt24(StaticField):
-    """unsigned, big endian 24-bit integer"""
-    def __init__(self, name: str) -> None:
-        StaticField.__init__(self, name, 3)
-
-    def _parse(self, stream: IO[bytes], context: Container) -> int:
-        (hi, lo) = _UBInt24_packer.unpack(StaticField._parse(self, stream, context))
-        return lo | (hi << 16)
-
-    def _build(self, obj: int, stream: IO[bytes], context: Container) -> None:
-        StaticField._build(self, _UBInt24_packer.pack(obj >> 16, obj & 0xFFFF), stream, context)
-
-class ULInt24(StaticField):
-    """unsigned, little endian 24-bit integer"""
-    def __init__(self, name: str) -> None:
-        StaticField.__init__(self, name, 3)
-
-    def _parse(self, stream: IO[bytes], context: Container) -> int:
-        (lo, hi) = _ULInt24_packer.unpack(StaticField._parse(self, stream, context))
-        return lo | (hi << 16)
-
-    def _build(self, obj: int, stream: IO[bytes], context: Container) -> None:
-        StaticField._build(self, _ULInt24_packer.pack(obj & 0xFFFF, obj >> 16), stream, context)

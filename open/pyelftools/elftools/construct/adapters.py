@@ -1,57 +1,22 @@
-from __future__ import annotations
-
-from io import BytesIO
-from typing import TYPE_CHECKING, Any, Literal
-
-from .core import AdaptationError, Adapter, Pass
-from .lib import FlagsContainer, HexString, bin_to_int, int_to_bin, swap_bytes
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Hashable, Mapping, Sized
-
-    from .core import Construct, _Pass
-    from .lib import Container, ListContainer
-
-
-__all__ = [
-    "BitIntegerAdapter",
-    "BitIntegerError",
-    "CStringAdapter",
-    "ConstAdapter",
-    "ConstError",
-    "ExprAdapter",
-    "FlagsAdapter",
-    "HexDumpAdapter",
-    "IndexingAdapter",
-    "LengthValueAdapter",
-    "MappingAdapter",
-    "MappingError",
-    "NoneOf",
-    "OneOf",
-    "PaddedStringAdapter",
-    "PaddingAdapter",
-    "PaddingError",
-    "SlicingAdapter",
-    "StringAdapter",
-    "TunnelAdapter",
-    "ValidationError",
-    "Validator",
-]
+from .core import Adapter, AdaptationError, Pass
+from .lib import int_to_bin, bin_to_int, swap_bytes
+from .lib import FlagsContainer, HexString
+from .lib.py3compat import BytesIO, decodebytes
 
 
 #===============================================================================
 # exceptions
 #===============================================================================
 class BitIntegerError(AdaptationError):
-    __slots__ = ()
+    __slots__ = []
 class MappingError(AdaptationError):
-    __slots__ = ()
+    __slots__ = []
 class ConstError(AdaptationError):
-    __slots__ = ()
+    __slots__ = []
 class ValidationError(AdaptationError):
-    __slots__ = ()
+    __slots__ = []
 class PaddingError(AdaptationError):
-    __slots__ = ()
+    __slots__ = []
 
 #===============================================================================
 # adapters
@@ -71,15 +36,15 @@ class BitIntegerAdapter(Adapter):
     * bytesize - number of bits per byte, used for byte-swapping (if swapped).
       default is 8.
     """
-    __slots__ = ("bytesize", "signed", "swapped", "width")
-    def __init__(self, subcon: Construct, width: int, swapped: bool = False, signed: bool = False,
-            bytesize: int = 8) -> None:
+    __slots__ = ["width", "swapped", "signed", "bytesize"]
+    def __init__(self, subcon, width, swapped = False, signed = False,
+                 bytesize = 8):
         Adapter.__init__(self, subcon)
         self.width = width
         self.swapped = swapped
         self.signed = signed
         self.bytesize = bytesize
-    def _encode(self, obj: int, context: Container) -> bytes:
+    def _encode(self, obj, context):
         if obj < 0 and not self.signed:
             raise BitIntegerError("object is negative, but field is not signed",
                 obj)
@@ -87,7 +52,7 @@ class BitIntegerAdapter(Adapter):
         if self.swapped:
             obj2 = swap_bytes(obj2, bytesize = self.bytesize)
         return obj2
-    def _decode(self, obj: bytes, context: Container) -> int:
+    def _decode(self, obj, context):
         if self.swapped:
             obj = swap_bytes(obj, bytesize = self.bytesize)
         return bin_to_int(obj, signed = self.signed)
@@ -108,31 +73,31 @@ class MappingAdapter(Adapter):
       in the encoding mapping. if no object is given, an exception is raised.
       if `Pass` is used, the unmapped object will be passed as-is
     """
-    __slots__ = ("decdefault", "decoding", "encdefault", "encoding")
-    def __init__(self, subcon: Construct, decoding: Mapping[Any, Any], encoding: Mapping[Any, Any],
-            decdefault: Hashable | _Pass = NotImplemented,
-            encdefault: Hashable | _Pass = NotImplemented,
-    ) -> None:
+    __slots__ = ["encoding", "decoding", "encdefault", "decdefault"]
+    def __init__(self, subcon, decoding, encoding,
+                 decdefault = NotImplemented, encdefault = NotImplemented):
         Adapter.__init__(self, subcon)
         self.decoding = decoding
         self.encoding = encoding
         self.decdefault = decdefault
         self.encdefault = encdefault
-    def _encode(self, obj: Hashable, context: Container) -> Hashable:
+    def _encode(self, obj, context):
         try:
             return self.encoding[obj]
         except (KeyError, TypeError):
             if self.encdefault is NotImplemented:
-                raise MappingError(f"no encoding mapping for {obj!r} [{self.subcon.name}]")
+                raise MappingError("no encoding mapping for %r [%s]" % (
+                    obj, self.subcon.name))
             if self.encdefault is Pass:
                 return obj
             return self.encdefault
-    def _decode(self, obj: Hashable, context: Container) -> Hashable:
+    def _decode(self, obj, context):
         try:
             return self.decoding[obj]
         except (KeyError, TypeError):
             if self.decdefault is NotImplemented:
-                raise MappingError(f"no decoding mapping for {obj!r} [{self.subcon.name}]")
+                raise MappingError("no decoding mapping for %r [%s]" % (
+                    obj, self.subcon.name))
             if self.decdefault is Pass:
                 return obj
             return self.decdefault
@@ -147,17 +112,17 @@ class FlagsAdapter(Adapter):
     * subcon - the subcon to extract
     * flags - a dictionary mapping flag-names to their value
     """
-    __slots__ = ("flags",)
-    def __init__(self, subcon: Construct, flags: dict[str, int]) -> None:
+    __slots__ = ["flags"]
+    def __init__(self, subcon, flags):
         Adapter.__init__(self, subcon)
         self.flags = flags
-    def _encode(self, obj: FlagsContainer, context: Container) -> int:
+    def _encode(self, obj, context):
         flags = 0
         for name, value in self.flags.items():
             if getattr(obj, name, False):
                 flags |= value
         return flags
-    def _decode(self, obj: int, context: Container) -> FlagsContainer:
+    def _decode(self, obj, context):
         obj2 = FlagsContainer()
         for name, value in self.flags.items():
             setattr(obj2, name, bool(obj & value))
@@ -174,19 +139,17 @@ class StringAdapter(Adapter):
     * encoding - the character encoding name (e.g., "utf8"), or None to
       return raw bytes (usually 8-bit ASCII).
     """
-    __slots__ = ("encoding",)
-    def __init__(self, subcon: Construct, encoding: str | None = None) -> None:
+    __slots__ = ["encoding"]
+    def __init__(self, subcon, encoding = None):
         Adapter.__init__(self, subcon)
         self.encoding = encoding
-    def _encode(self, obj: bytes | str, context: Container) -> bytes:
+    def _encode(self, obj, context):
         if self.encoding:
-            assert isinstance(obj, str)
             obj = obj.encode(self.encoding)
-        assert isinstance(obj, bytes)
         return obj
-    def _decode(self, obj: bytes, context: Container) -> bytes | str:
+    def _decode(self, obj, context):
         if self.encoding:
-            return obj.decode(self.encoding)
+            obj = obj.decode(self.encoding)
         return obj
 
 class PaddedStringAdapter(Adapter):
@@ -203,9 +166,9 @@ class PaddedStringAdapter(Adapter):
       "left"). the default is "right". trimming is only meaningful for
       building, when the given string is too long.
     """
-    __slots__ = ("padchar", "paddir", "trimdir")
-    def __init__(self, subcon: Construct, padchar: bytes = b"\x00", paddir: Literal["right", "left", "center"] = "right",
-            trimdir: Literal["right", "left"] = "right") -> None:
+    __slots__ = ["padchar", "paddir", "trimdir"]
+    def __init__(self, subcon, padchar = b"\x00", paddir = "right",
+                 trimdir = "right"):
         if paddir not in ("right", "left", "center"):
             raise ValueError("paddir must be 'right', 'left' or 'center'",
                 paddir)
@@ -215,7 +178,7 @@ class PaddedStringAdapter(Adapter):
         self.padchar = padchar
         self.paddir = paddir
         self.trimdir = trimdir
-    def _decode(self, obj: bytes, context: Container) -> bytes:
+    def _decode(self, obj, context):
         if self.paddir == "right":
             obj = obj.rstrip(self.padchar)
         elif self.paddir == "left":
@@ -223,7 +186,7 @@ class PaddedStringAdapter(Adapter):
         else:
             obj = obj.strip(self.padchar)
         return obj
-    def _encode(self, obj: bytes, context: Container) -> bytes:
+    def _encode(self, obj, context):
         size = self._sizeof(context)
         if self.paddir == "right":
             obj = obj.ljust(size, self.padchar)
@@ -247,10 +210,10 @@ class LengthValueAdapter(Adapter):
     Parameters:
     * subcon - the subcon returning a length-value pair
     """
-    __slots__ = ()
-    def _encode(self, obj: Sized, context: Container) -> tuple[int, Sized]:
+    __slots__ = []
+    def _encode(self, obj, context):
         return (len(obj), obj)
-    def _decode(self, obj: tuple[int, Sized] | ListContainer, context: Container) -> Sized:
+    def _decode(self, obj, context):
         return obj[1]
 
 class CStringAdapter(StringAdapter):
@@ -264,14 +227,13 @@ class CStringAdapter(StringAdapter):
       return raw-bytes. the terminator characters are not affected by the
       encoding.
     """
-    __slots__ = ("terminators",)
-    def __init__(self, subcon: Construct, terminators: bytes = b"\x00", encoding: str | None = None) -> None:
+    __slots__ = ["terminators"]
+    def __init__(self, subcon, terminators = b"\x00", encoding = None):
         StringAdapter.__init__(self, subcon, encoding = encoding)
         self.terminators = terminators
-    def _encode(self, obj: bytes | str, context: Container) -> bytes:
+    def _encode(self, obj, context):
         return StringAdapter._encode(self, obj, context) + self.terminators[0:1]
-    def _decode(self, obj: list[bytes], context: Container) -> bytes | str:  # type: ignore[override] # ty: ignore[invalid-method-override]
-        # This violates the Liskov Substitution Principle: should be `obj: bytes`, but RepeatUntil() converts `bytes` to `list[byte]`
+    def _decode(self, obj, context):
         return StringAdapter._decode(self, b''.join(obj[:-1]), context)
 
 class TunnelAdapter(Adapter):
@@ -296,13 +258,13 @@ class TunnelAdapter(Adapter):
         GreedyRange(UBInt16("elements"))
     )
     """
-    __slots__ = ("inner_subcon",)
-    def __init__(self, subcon: Construct, inner_subcon: Construct) -> None:
+    __slots__ = ["inner_subcon"]
+    def __init__(self, subcon, inner_subcon):
         Adapter.__init__(self, subcon)
         self.inner_subcon = inner_subcon
-    def _decode(self, obj: bytes, context: Container) -> Any:
+    def _decode(self, obj, context):
         return self.inner_subcon._parse(BytesIO(obj), context)
-    def _encode(self, obj: Any, context: Container) -> bytes:
+    def _encode(self, obj, context):
         stream = BytesIO()
         self.inner_subcon._build(obj, stream, context)
         return stream.getvalue()
@@ -326,27 +288,23 @@ class ExprAdapter(Adapter):
         decoder = lambda obj, ctx: obj * 4,
     )
     """
-    __slots__ = ("__decode", "__encode")
-    def __init__(self, subcon: Construct, encoder: Callable[[Any, Container], bytes], decoder: Callable[[bytes, Container], Any]) -> None:
+    __slots__ = ["_encode", "_decode"]
+    def __init__(self, subcon, encoder, decoder):
         Adapter.__init__(self, subcon)
-        self.__encode = encoder
-        self.__decode = decoder
-    def _encode(self, obj: Any, context: Container) -> Any:
-        return self.__encode(obj, context)
-    def _decode(self, obj: Any, context: Container) -> Any:
-        return self.__decode(obj, context)
+        self._encode = encoder
+        self._decode = decoder
 
 class HexDumpAdapter(Adapter):
     """
     Adapter for hex-dumping strings. It returns a HexString, which is a string
     """
-    __slots__ = ("linesize",)
-    def __init__(self, subcon: Construct, linesize: int = 16) -> None:
+    __slots__ = ["linesize"]
+    def __init__(self, subcon, linesize = 16):
         Adapter.__init__(self, subcon)
         self.linesize = linesize
-    def _encode(self, obj: Any, context: Container) -> Any:
+    def _encode(self, obj, context):
         return obj
-    def _decode(self, obj: bytes, context: Container) -> HexString:
+    def _decode(self, obj, context):
         return HexString(obj, linesize = self.linesize)
 
 class ConstAdapter(Adapter):
@@ -361,18 +319,18 @@ class ConstAdapter(Adapter):
     Example:
     Const(Field("signature", 2), "MZ")
     """
-    __slots__ = ("value",)
-    def __init__(self, subcon: Construct, value: object) -> None:
+    __slots__ = ["value"]
+    def __init__(self, subcon, value):
         Adapter.__init__(self, subcon)
         self.value = value
-    def _encode(self, obj: object, context: Container) -> object:
+    def _encode(self, obj, context):
         if obj is None or obj == self.value:
             return self.value
         else:
-            raise ConstError(f"expected {self.value!r}, found {obj!r}")
-    def _decode(self, obj: object, context: Container) -> object:
+            raise ConstError("expected %r, found %r" % (self.value, obj))
+    def _decode(self, obj, context):
         if obj != self.value:
-            raise ConstError(f"expected {self.value!r}, found {obj!r}")
+            raise ConstError("expected %r, found %r" % (self.value, obj))
         return obj
 
 class SlicingAdapter(Adapter):
@@ -385,16 +343,16 @@ class SlicingAdapter(Adapter):
     * stop - stop index (or None for up-to-end)
     * step - step (or None for every element)
     """
-    __slots__ = ("start", "step", "stop")
-    def __init__(self, subcon: Construct, start: int, stop: int | None = None) -> None:
+    __slots__ = ["start", "stop", "step"]
+    def __init__(self, subcon, start, stop = None):
         Adapter.__init__(self, subcon)
         self.start = start
         self.stop = stop
-    def _encode(self, obj: list[Any], context: Container) -> list[Any]:
+    def _encode(self, obj, context):
         if self.start is None:
             return obj
         return [None] * self.start + obj
-    def _decode(self, obj: list[Any], context: Container) -> list[Any]:
+    def _decode(self, obj, context):
         return obj[self.start:self.stop]
 
 class IndexingAdapter(Adapter):
@@ -405,15 +363,15 @@ class IndexingAdapter(Adapter):
     * subcon - the subcon to index
     * index - the index of the list to get
     """
-    __slots__ = ("index",)
-    def __init__(self, subcon: Construct, index: int) -> None:
+    __slots__ = ["index"]
+    def __init__(self, subcon, index):
         Adapter.__init__(self, subcon)
         if type(index) is not int:
             raise TypeError("index must be an integer", type(index))
         self.index = index
-    def _encode(self, obj: Any, context: Container) -> list[Any]:
+    def _encode(self, obj, context):
         return [None] * self.index + [obj]
-    def _decode(self, obj: list[Any], context: Container) -> Any:
+    def _decode(self, obj, context):
         return obj[self.index]
 
 class PaddingAdapter(Adapter):
@@ -426,18 +384,18 @@ class PaddingAdapter(Adapter):
     * strict - whether or not to verify, during parsing, that the given
       padding matches the padding pattern. default is False (unstrict)
     """
-    __slots__ = ("pattern", "strict")
-    def __init__(self, subcon: Construct, pattern: bytes = b"\x00", strict: bool = False) -> None:
+    __slots__ = ["pattern", "strict"]
+    def __init__(self, subcon, pattern = b"\x00", strict = False):
         Adapter.__init__(self, subcon)
         self.pattern = pattern
         self.strict = strict
-    def _encode(self, obj: None, context: Container) -> bytes:
+    def _encode(self, obj, context):
         return self._sizeof(context) * self.pattern
-    def _decode(self, obj: bytes, context: Container) -> bytes:
+    def _decode(self, obj, context):
         if self.strict:
             expected = self._sizeof(context) * self.pattern
             if obj != expected:
-                raise PaddingError(f"expected {expected!r}, found {obj!r}")
+                raise PaddingError("expected %r, found %r" % (expected, obj))
         return obj
 
 
@@ -452,14 +410,14 @@ class Validator(Adapter):
     Parameters:
     * subcon - the subcon to validate
     """
-    __slots__ = ()
-    def _decode(self, obj: object, context: Container) -> object:
+    __slots__ = []
+    def _decode(self, obj, context):
         if not self._validate(obj, context):
             raise ValidationError("invalid object", obj)
         return obj
-    def _encode(self, obj: object, context: Container) -> object:
+    def _encode(self, obj, context):
         return self._decode(obj, context)
-    def _validate(self, obj: object, context: Container) -> bool:
+    def _validate(self, obj, context):
         raise NotImplementedError()
 
 class OneOf(Validator):
@@ -469,26 +427,25 @@ class OneOf(Validator):
     :param ``Construct`` subcon: object to validate
     :param iterable valids: a set of valid values
 
-    >>> from ..construct import UBInt8
-    >>> OneOf(UBInt8("foo"), [4,5,6,7]).parse(b"\\x05")
+    >>> OneOf(UBInt8("foo"), [4,5,6,7]).parse("\\x05")
     5
-    >>> OneOf(UBInt8("foo"), [4,5,6,7]).parse(b"\\x08")  # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> OneOf(UBInt8("foo"), [4,5,6,7]).parse("\\x08")
     Traceback (most recent call last):
         ...
-    ValidationError: ('invalid object', 8)
+    construct.core.ValidationError: ('invalid object', 8)
     >>>
     >>> OneOf(UBInt8("foo"), [4,5,6,7]).build(5)
-    b'\\x05'
-    >>> OneOf(UBInt8("foo"), [4,5,6,7]).build(9)  # doctest: +IGNORE_EXCEPTION_DETAIL
+    '\\x05'
+    >>> OneOf(UBInt8("foo"), [4,5,6,7]).build(9)
     Traceback (most recent call last):
         ...
-    ValidationError: ('invalid object', 9)
+    construct.core.ValidationError: ('invalid object', 9)
     """
-    __slots__ = ("valids",)
-    def __init__(self, subcon: Construct, valids: list[object]) -> None:
+    __slots__ = ["valids"]
+    def __init__(self, subcon, valids):
         Validator.__init__(self, subcon)
         self.valids = valids
-    def _validate(self, obj: object, context: Container) -> bool:
+    def _validate(self, obj, context):
         return obj in self.valids
 
 class NoneOf(Validator):
@@ -498,17 +455,16 @@ class NoneOf(Validator):
     :param ``Construct`` subcon: object to validate
     :param iterable invalids: a set of invalid values
 
-    >>> from ..construct import UBInt8
-    >>> NoneOf(UBInt8("foo"), [4,5,6,7]).parse(b"\\x08")
+    >>> NoneOf(UBInt8("foo"), [4,5,6,7]).parse("\\x08")
     8
-    >>> NoneOf(UBInt8("foo"), [4,5,6,7]).parse(b"\\x06")  # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> NoneOf(UBInt8("foo"), [4,5,6,7]).parse("\\x06")
     Traceback (most recent call last):
         ...
-    ValidationError: ('invalid object', 6)
+    construct.core.ValidationError: ('invalid object', 6)
     """
-    __slots__ = ("invalids",)
-    def __init__(self, subcon: Construct, invalids: list[object]) -> None:
+    __slots__ = ["invalids"]
+    def __init__(self, subcon, invalids):
         Validator.__init__(self, subcon)
         self.invalids = invalids
-    def _validate(self, obj: object, context: Container) -> bool:
+    def _validate(self, obj, context):
         return obj not in self.invalids

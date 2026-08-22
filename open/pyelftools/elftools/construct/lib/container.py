@@ -1,46 +1,13 @@
 """
 Various containers.
 """
-from __future__ import annotations
 
-from collections.abc import MutableMapping
-from functools import wraps
 from pprint import pformat
-from typing import IO, TYPE_CHECKING, Any, Literal, overload
+from .py3compat import MutableMapping
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
-    from typing import Concatenate, ParamSpec, TypeVar
-
-    from typing_extensions import Self  # 3.11+
-
-    from ..core import Construct
-    from .hex import HexString
-
-    _P = ParamSpec('_P')
-    _R = TypeVar('_R')
-    _T = TypeVar('_T')
-
-
-__all__ = [
-    "Container",
-    "FlagsContainer",
-    "LazyContainer",
-    "ListContainer",
-    "recursion_lock",
-]
-
-
-def recursion_lock(
-    retval: _R,
-    lock_name: str = "__recursion_lock__",
-) -> Callable[[Callable[Concatenate[Any, _P], _T]], Callable[Concatenate[Any, _P], _T | _R]]:
-
-    def decorator(
-        func: Callable[Concatenate[Any, _P], _T],
-    ) -> Callable[Concatenate[Any, _P], _T | _R]:
-        @wraps(func)
-        def wrapper(self: Any, *args: _P.args, **kw: _P.kwargs) -> _T | _R:
+def recursion_lock(retval, lock_name = "__recursion_lock__"):
+    def decorator(func):
+        def wrapper(self, *args, **kw):
             if getattr(self, lock_name, False):
                 return retval
             setattr(self, lock_name, True)
@@ -48,79 +15,75 @@ def recursion_lock(
                 return func(self, *args, **kw)
             finally:
                 setattr(self, lock_name, False)
+        wrapper.__name__ = func.__name__
         return wrapper
     return decorator
 
-class Container(MutableMapping[str, Any]):
+class Container(MutableMapping):
     """
     A generic container of attributes.
 
     Containers are the common way to express parsed data.
     """
 
-    def __init__(self, **kw: Any) -> None:
+    def __init__(self, **kw):
         self.__dict__ = kw
 
     # The core dictionary interface.
 
-    @overload
-    def __getitem__(self, name: Literal[
-        "ch_addralign", "ch_size",
-        "length",
-        "n_descsz", "n_offset", "n_namesz",
-        "sh_addralign", "sh_flags", "sh_size",
-        "bloom_size", "nbuckets", "nchains",
-    ]) -> int: ...
-    @overload
-    def __getitem__(self, name: Literal[
-        "ch_type",
-        "sh_type",
-        "n_name", "n_type",
-        "tag", "vendor_name",
-    ]) -> str: ...
-    @overload
-    def __getitem__(self, name: Literal[
-        "buckets", "chains",
-    ]) -> list[int]: ...
-    @overload
-    def __getitem__(self, name: str) -> Any: ...
-    def __getitem__(self, name: str) -> Any:
+    def __getitem__(self, name):
         return self.__dict__[name]
 
-    def __delitem__(self, name: str) -> None:
+    def __delitem__(self, name):
         del self.__dict__[name]
 
-    def __setitem__(self, name: str, value: Any) -> None:
+    def __setitem__(self, name, value):
         self.__dict__[name] = value
 
-    def __iter__(self) -> Iterator[str]:
-        return iter(self.__dict__)
+    def keys(self):
+        return self.__dict__.keys()
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.__dict__.keys())
+
+    # Extended dictionary interface.
+
+    def update(self, other):
+        self.__dict__.update(other)
+
+    __update__ = update
+
+    def __contains__(self, value):
+        return value in self.__dict__
+
+    # Rich comparisons.
+
+    def __eq__(self, other):
+        try:
+            return self.__dict__ == other.__dict__
+        except AttributeError:
+            return False
+
+    def __ne__(self, other):
+        return not self == other
 
     # Copy interface.
 
-    def copy(self) -> Self:
+    def copy(self):
         return self.__class__(**self.__dict__)
 
     __copy__ = copy
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.__dict__!r})"
+    # Iterator interface.
 
-    def __str__(self) -> str:
-        return f"{self.__class__.__name__}({self.__dict__!s})"
+    def __iter__(self):
+        return iter(self.__dict__)
 
-    if TYPE_CHECKING:
-        # elftools.construct.debug Probe.printout()
-        stream_position: int
-        following_stream_data: str | HexString
-        context: Container
-        stack: ListContainer
-        # allow arbitray attributes
-        def __setattr__(self, name: str, value: object) -> None: ...
-        def __getattr__(self, name: str) -> Any: ...
+    def __repr__(self):
+        return "%s(%s)" % (self.__class__.__name__, repr(self.__dict__))
+
+    def __str__(self):
+        return "%s(%s)" % (self.__class__.__name__, str(self.__dict__))
 
 class FlagsContainer(Container):
     """
@@ -130,62 +93,65 @@ class FlagsContainer(Container):
     """
 
     @recursion_lock("<...>")
-    def __str__(self) -> str:
-        d = {k: self[k] for k in self
-                 if self[k] and not k.startswith("_")}
-        return f"{self.__class__.__name__}({pformat(d)})"
+    def __str__(self):
+        d = dict((k, self[k]) for k in self
+                 if self[k] and not k.startswith("_"))
+        return "%s(%s)" % (self.__class__.__name__, pformat(d))
 
-class ListContainer(list[Any]):
+class ListContainer(list):
     """
     A container for lists.
     """
 
-    __slots__ = ("__recursion_lock__",)
+    __slots__ = ["__recursion_lock__"]
 
     @recursion_lock("[...]")
-    def __str__(self) -> str:
+    def __str__(self):
         return pformat(self)
 
-class LazyContainer:
+class LazyContainer(object):
 
-    __slots__ = ("_value", "context", "pos", "stream", "subcon")
+    __slots__ = ["subcon", "stream", "pos", "context", "_value"]
 
-    def __init__(self, subcon: Construct, stream: IO[bytes], pos: int, context: Container) -> None:
+    def __init__(self, subcon, stream, pos, context):
         self.subcon = subcon
         self.stream = stream
         self.pos = pos
         self.context = context
         self._value = NotImplemented
 
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, LazyContainer) and self._value == other._value
+    def __eq__(self, other):
+        try:
+            return self._value == other._value
+        except AttributeError:
+            return False
 
-    def __ne__(self, other: object) -> bool:
+    def __ne__(self, other):
         return not (self == other)
 
-    def __str__(self) -> str:
+    def __str__(self):
         return self.__pretty_str__()
 
-    def __pretty_str__(self, nesting: int = 1, indentation: str = "    ") -> str:
+    def __pretty_str__(self, nesting = 1, indentation = "    "):
         if self._value is NotImplemented:
             text = "<unread>"
         elif hasattr(self._value, "__pretty_str__"):
             text = self._value.__pretty_str__(nesting, indentation)
         else:
             text = str(self._value)
-        return f"{self.__class__.__name__}: {text}"
+        return "%s: %s" % (self.__class__.__name__, text)
 
-    def read(self) -> Any:
+    def read(self):
         self.stream.seek(self.pos)
         return self.subcon._parse(self.stream, self.context)
 
-    def dispose(self) -> None:
-        del self.subcon
-        del self.stream
-        del self.context
-        del self.pos
+    def dispose(self):
+        self.subcon = None
+        self.stream = None
+        self.context = None
+        self.pos = None
 
-    def _get_value(self) -> Any:
+    def _get_value(self):
         if self._value is NotImplemented:
             self._value = self.read()
         return self._value

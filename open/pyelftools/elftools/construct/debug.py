@@ -1,16 +1,13 @@
 """
 Debugging utilities for constructs
 """
-from __future__ import annotations
-
-import inspect
-import pdb  # noqa: T100 - debugger integration is this module's purpose
+from __future__ import print_function
 import sys
 import traceback
-from typing import IO, Any
-
+import pdb
+import inspect
 from .core import Construct, Subconstruct
-from .lib import Container, HexString, ListContainer
+from .lib import HexString, Container, ListContainer
 
 
 class Probe(Construct):
@@ -36,37 +33,34 @@ class Probe(Construct):
         UBInt8("b"),
     )
     """
-    __slots__ = (
-        "printname",
-        "show_context",
-        "show_stack",
-        "show_stream",
+    __slots__ = [
+        "printname", "show_stream", "show_context", "show_stack",
         "stream_lookahead"
-    )
+    ]
     counter = 0
 
-    def __init__(self, name: str | None = None, show_stream: bool = True,
-            show_context: bool = True, show_stack: bool = True,
-            stream_lookahead: int = 100) -> None:
+    def __init__(self, name = None, show_stream = True,
+                 show_context = True, show_stack = True,
+                 stream_lookahead = 100):
         Construct.__init__(self, None)
         if name is None:
             Probe.counter += 1
-            name = f"<unnamed {int(Probe.counter)}>"
+            name = "<unnamed %d>" % (Probe.counter,)
         self.printname = name
         self.show_stream = show_stream
         self.show_context = show_context
         self.show_stack = show_stack
         self.stream_lookahead = stream_lookahead
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.printname!r})"
-    def _parse(self, stream: IO[bytes], context: Container) -> None:
+    def __repr__(self):
+        return "%s(%r)" % (self.__class__.__name__, self.printname)
+    def _parse(self, stream, context):
         self.printout(stream, context)
-    def _build(self, obj: Any, stream: IO[bytes], context: Container) -> None:
+    def _build(self, obj, stream, context):
         self.printout(stream, context)
-    def _sizeof(self, context: Container) -> int:
+    def _sizeof(self, context):
         return 0
 
-    def printout(self, stream: IO[bytes], context: Container) -> None:
+    def printout(self, stream, context):
         obj = Container()
         if self.show_stream:
             obj.stream_position = stream.tell()
@@ -76,6 +70,7 @@ class Probe(Construct):
             else:
                 stream.seek(-len(follows), 1)
                 obj.following_stream_data = HexString(follows)
+            print
 
         if self.show_context:
             obj.context = context
@@ -86,7 +81,7 @@ class Probe(Construct):
             frames.reverse()
             for f in frames:
                 a = Container()
-                a.update(f.f_locals)
+                a.__update__(f.f_locals)
                 obj.stack.append(a)
 
         print("=" * 80)
@@ -111,8 +106,8 @@ class Debugger(Subconstruct):
         )
     )
     """
-    __slots__ = ("retval",)
-    def _parse(self, stream: IO[bytes], context: Container) -> Any:
+    __slots__ = ["retval"]
+    def _parse(self, stream, context):
         try:
             return self.subcon._parse(stream, context)
         except Exception:
@@ -123,14 +118,14 @@ class Debugger(Subconstruct):
                 raise
             else:
                 return self.retval
-    def _build(self, obj: Any, stream: IO[bytes], context: Container) -> None:
+    def _build(self, obj, stream, context):
         try:
             self.subcon._build(obj, stream, context)
-        except Exception:  # noqa: BLE001 - hand any failure to the debugger
+        except Exception:
             self.handle_exc()
-    def handle_exc(self, msg: str | None = None) -> None:
+    def handle_exc(self, msg = None):
         print("=" * 80)
-        print(f"Debugging exception of {self.subcon}:")
+        print("Debugging exception of %s:" % (self.subcon,))
         print("".join(traceback.format_exception(*sys.exc_info())[1:]))
         if msg:
             print(msg)

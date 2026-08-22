@@ -6,23 +6,15 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-from __future__ import annotations
-
+from collections import namedtuple
 from io import BytesIO
-from typing import IO, TYPE_CHECKING, Any, NamedTuple
 
+from ..common.utils import struct_parse, bytelist2string, read_blob
 from ..common.exceptions import DWARFError
-from ..common.utils import struct_parse
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
-
-    from ..construct.core import Construct
-    from .structs import DWARFStructs
 
 
 # DWARF expression opcodes. name -> opcode mapping
-DW_OP_name2opcode: Mapping[str, int] = dict(
+DW_OP_name2opcode = dict(
     DW_OP_addr=0x03,
     DW_OP_deref=0x06,
     DW_OP_const1u=0x08,
@@ -102,57 +94,61 @@ DW_OP_name2opcode: Mapping[str, int] = dict(
     DW_OP_GNU_deref_type=0xf6,
     DW_OP_GNU_convert=0xf7,
     DW_OP_GNU_parameter_ref=0xfa,
-    DW_OP_GNU_addr_index=0xfb,
-    DW_OP_GNU_const_index=0xfc,
-    DW_OP_GNU_variable_value=0xfd,
     DW_OP_hi_user=0xff,
-    **{f"DW_OP_lit{val}": 0x30 + val for val in range(32)},
-    **{f"DW_OP_reg{val}": 0x50 + val for val in range(32)},
-    **{f"DW_OP_breg{val}": 0x70 + val for val in range(32)},
 )
 
+def _generate_dynamic_values(map, prefix, index_start, index_end, value_start):
+    """ Generate values in a map (dict) dynamically. Each key starts with
+        a (string) prefix, followed by an index in the inclusive range
+        [index_start, index_end]. The values start at value_start.
+    """
+    for index in range(index_start, index_end + 1):
+        name = '%s%s' % (prefix, index)
+        value = value_start + index - index_start
+        map[name] = value
+
+_generate_dynamic_values(DW_OP_name2opcode, 'DW_OP_lit', 0, 31, 0x30)
+_generate_dynamic_values(DW_OP_name2opcode, 'DW_OP_reg', 0, 31, 0x50)
+_generate_dynamic_values(DW_OP_name2opcode, 'DW_OP_breg', 0, 31, 0x70)
+
 # opcode -> name mapping
-DW_OP_opcode2name: Mapping[int, str] = {v: k for k, v in DW_OP_name2opcode.items()}
+DW_OP_opcode2name = dict((v, k) for k, v in DW_OP_name2opcode.items())
 
 
 # Each parsed DWARF expression is returned as this type with its numeric opcode,
 # op name (as a string) and a list of arguments.
-class DWARFExprOp(NamedTuple):
-    op: int
-    op_name: str
-    args: list[Any]
-    offset: int
+DWARFExprOp = namedtuple('DWARFExprOp', 'op op_name args offset')
 
 
-class DWARFExprParser:
+class DWARFExprParser(object):
     """DWARF expression parser.
 
     When initialized, requires structs to cache a dispatch table. After that,
     parse_expr can be called repeatedly - it's stateless.
     """
 
-    def __init__(self, structs: DWARFStructs) -> None:
+    def __init__(self, structs):
         self._dispatch_table = _init_dispatch_table(structs)
 
-    def parse_expr(self, expr: bytes | Iterable[int]) -> list[DWARFExprOp]:
-        """ Parses expr (bytes or a list of integers) into a list of DWARFExprOp.
+    def parse_expr(self, expr):
+        """ Parses expr (a list of integers) into a list of DWARFExprOp.
 
         The list can potentially be nested.
         """
-        stream = BytesIO(bytes(expr))
-        parsed: list[DWARFExprOp] = []
+        stream = BytesIO(bytelist2string(expr))
+        parsed = []
 
         while True:
             # Get the next opcode from the stream. If nothing is left in the
             # stream, we're done.
             offset = stream.tell()
             byte = stream.read(1)
-            if not byte:
+            if len(byte) == 0:
                 break
 
             # Decode the opcode and its name.
             op = ord(byte)
-            op_name = DW_OP_opcode2name.get(op, f'OP:0x{op:x}')
+            op_name = DW_OP_opcode2name.get(op, 'OP:0x%x' % op)
 
             # Use dispatch table to parse args.
             arg_parser = self._dispatch_table[op]
@@ -163,79 +159,74 @@ class DWARFExprParser:
         return parsed
 
 
-def _init_dispatch_table(structs: DWARFStructs) -> dict[int, Callable[[IO[bytes]], list[Any]]]:
+def _init_dispatch_table(structs):
     """Creates a dispatch table for parsing args of an op.
 
     Returns a dict mapping opcode to a function. The function accepts a stream
     and return a list of parsed arguments for the opcode from the stream;
     the stream is advanced by the function as needed.
     """
-    table: dict[int, Callable[[IO[bytes]], list[Any]]] = {}
-    def add(opcode_name: str, func: Callable[[IO[bytes]], list[Any]]) -> None:
+    table = {}
+    def add(opcode_name, func):
         table[DW_OP_name2opcode[opcode_name]] = func
 
-    def parse_noargs() -> Callable[[IO[bytes]], list[None]]:
+    def parse_noargs():
         return lambda stream: []
 
-    def parse_op_addr() -> Callable[[IO[bytes]], list[int]]:
-        return lambda stream: [struct_parse(structs.the_Dwarf_target_addr,
+    def parse_op_addr():
+        return lambda stream: [struct_parse(structs.Dwarf_target_addr(''),
                                             stream)]
 
-    def parse_arg_struct(arg_struct: Construct) -> Callable[[IO[bytes]], list[Any]]:
+    def parse_arg_struct(arg_struct):
         return lambda stream: [struct_parse(arg_struct, stream)]
 
-    def parse_arg_struct2(
-        arg1_struct: Construct,
-        arg2_struct: Construct,
-    ) -> Callable[[IO[bytes]], list[Any]]:
+    def parse_arg_struct2(arg1_struct, arg2_struct):
         return lambda stream: [struct_parse(arg1_struct, stream),
                                struct_parse(arg2_struct, stream)]
 
     # ULEB128, then an expression of that length
-    def parse_nestedexpr() -> Callable[[IO[bytes]], list[list[DWARFExprOp]]]:
-
-        def parse(stream: IO[bytes]) -> list[list[DWARFExprOp]]:
-            size: int = struct_parse(structs.the_Dwarf_uleb128, stream)
-            nested_expr_blob = stream.read(size)
+    def parse_nestedexpr():
+        def parse(stream):
+            size = struct_parse(structs.Dwarf_uleb128(''), stream)
+            nested_expr_blob = read_blob(stream, size)
             return [DWARFExprParser(structs).parse_expr(nested_expr_blob)]
         return parse
 
     # ULEB128, then a blob of that size
-    def parse_blob() -> Callable[[IO[bytes]], list[list[int]]]:
-        return lambda stream: [list(stream.read(struct_parse(structs.the_Dwarf_uleb128, stream)))]
+    def parse_blob():
+        return lambda stream: [read_blob(stream, struct_parse(structs.Dwarf_uleb128(''), stream))]
 
     # ULEB128 with datatype DIE offset, then byte, then a blob of that size
-    def parse_typedblob() -> Callable[[IO[bytes]], list[int | list[int]]]:
-        return lambda stream: [struct_parse(structs.the_Dwarf_uleb128, stream), list(stream.read(struct_parse(structs.the_Dwarf_uint8, stream)))]
-
+    def parse_typedblob():
+        return lambda stream: [struct_parse(structs.Dwarf_uleb128(''), stream), read_blob(stream, struct_parse(structs.Dwarf_uint8(''), stream))]
+    
     # https://yurydelendik.github.io/webassembly-dwarf/
     # Byte, then variant: 0, 1, 2 => uleb128, 3 => uint32
-    def parse_wasmloc() -> Callable[[IO[bytes]], list[int]]:
-
-        def parse(stream: IO[bytes]) -> list[int]:
-            op: int = struct_parse(structs.the_Dwarf_uint8, stream)
+    def parse_wasmloc():
+        def parse(stream):
+            op = struct_parse(structs.Dwarf_uint8(''), stream)
             if 0 <= op <= 2:
-                return [op, struct_parse(structs.the_Dwarf_uleb128, stream)]
+                return [op, struct_parse(structs.Dwarf_uleb128(''), stream)]
             elif op == 3:
-                return [op, struct_parse(structs.the_Dwarf_uint32, stream)]
+                return [op, struct_parse(structs.Dwarf_uint32(''), stream)]
             else:
-                raise DWARFError(f"Unknown operation code in DW_OP_WASM_location: {int(op)}")
+                raise DWARFError("Unknown operation code in DW_OP_WASM_location: %d" % (op,))
         return parse
 
     add('DW_OP_addr', parse_op_addr())
-    add('DW_OP_addrx', parse_arg_struct(structs.the_Dwarf_uleb128))
-    add('DW_OP_const1u', parse_arg_struct(structs.the_Dwarf_uint8))
+    add('DW_OP_addrx', parse_arg_struct(structs.Dwarf_uleb128('')))
+    add('DW_OP_const1u', parse_arg_struct(structs.Dwarf_uint8('')))
     add('DW_OP_const1s', parse_arg_struct(structs.Dwarf_int8('')))
-    add('DW_OP_const2u', parse_arg_struct(structs.the_Dwarf_uint16))
+    add('DW_OP_const2u', parse_arg_struct(structs.Dwarf_uint16('')))
     add('DW_OP_const2s', parse_arg_struct(structs.Dwarf_int16('')))
-    add('DW_OP_const4u', parse_arg_struct(structs.the_Dwarf_uint32))
+    add('DW_OP_const4u', parse_arg_struct(structs.Dwarf_uint32('')))
     add('DW_OP_const4s', parse_arg_struct(structs.Dwarf_int32('')))
     add('DW_OP_const8u', parse_arg_struct(structs.Dwarf_uint64('')))
     add('DW_OP_const8s', parse_arg_struct(structs.Dwarf_int64('')))
-    add('DW_OP_constu', parse_arg_struct(structs.the_Dwarf_uleb128))
-    add('DW_OP_consts', parse_arg_struct(structs.the_Dwarf_sleb128))
-    add('DW_OP_pick', parse_arg_struct(structs.the_Dwarf_uint8))
-    add('DW_OP_plus_uconst', parse_arg_struct(structs.the_Dwarf_uleb128))
+    add('DW_OP_constu', parse_arg_struct(structs.Dwarf_uleb128('')))
+    add('DW_OP_consts', parse_arg_struct(structs.Dwarf_sleb128('')))
+    add('DW_OP_pick', parse_arg_struct(structs.Dwarf_uint8('')))
+    add('DW_OP_plus_uconst', parse_arg_struct(structs.Dwarf_uleb128('')))
     add('DW_OP_bra', parse_arg_struct(structs.Dwarf_int16('')))
     add('DW_OP_skip', parse_arg_struct(structs.Dwarf_int16('')))
 
@@ -251,43 +242,43 @@ def _init_dispatch_table(structs: DWARFStructs) -> dict[int, Callable[[IO[bytes]
                     'DW_OP_GNU_push_tls_address', 'DW_OP_GNU_uninit']:
         add(opname, parse_noargs())
 
-    for n in range(32):
-        add(f'DW_OP_lit{n}', parse_noargs())
-        add(f'DW_OP_reg{n}', parse_noargs())
-        add(f'DW_OP_breg{n}', parse_arg_struct(structs.the_Dwarf_sleb128))
+    for n in range(0, 32):
+        add('DW_OP_lit%s' % n, parse_noargs())
+        add('DW_OP_reg%s' % n, parse_noargs())
+        add('DW_OP_breg%s' % n, parse_arg_struct(structs.Dwarf_sleb128('')))
 
-    for opname in [ 'DW_OP_regx', 'DW_OP_piece', 'DW_OP_convert', 'DW_OP_GNU_convert',
-                    'DW_OP_GNU_addr_index', 'DW_OP_GNU_const_index', 'DW_OP_GNU_variable_value']:
-        add(opname, parse_arg_struct(structs.the_Dwarf_uleb128))
-
-    add('DW_OP_fbreg', parse_arg_struct(structs.the_Dwarf_sleb128))
-    add('DW_OP_bregx', parse_arg_struct2(structs.the_Dwarf_uleb128,
-                                         structs.the_Dwarf_sleb128))
-    add('DW_OP_bit_piece', parse_arg_struct2(structs.the_Dwarf_uleb128,
-                                             structs.the_Dwarf_uleb128))
+    add('DW_OP_fbreg', parse_arg_struct(structs.Dwarf_sleb128('')))
+    add('DW_OP_regx', parse_arg_struct(structs.Dwarf_uleb128('')))
+    add('DW_OP_bregx', parse_arg_struct2(structs.Dwarf_uleb128(''),
+                                         structs.Dwarf_sleb128('')))
+    add('DW_OP_piece', parse_arg_struct(structs.Dwarf_uleb128('')))
+    add('DW_OP_bit_piece', parse_arg_struct2(structs.Dwarf_uleb128(''),
+                                             structs.Dwarf_uleb128('')))
     add('DW_OP_deref_size', parse_arg_struct(structs.Dwarf_int8('')))
     add('DW_OP_xderef_size', parse_arg_struct(structs.Dwarf_int8('')))
-    add('DW_OP_call2', parse_arg_struct(structs.the_Dwarf_uint16))
-    add('DW_OP_call4', parse_arg_struct(structs.the_Dwarf_uint32))
-    add('DW_OP_call_ref', parse_arg_struct(structs.the_Dwarf_offset))
+    add('DW_OP_call2', parse_arg_struct(structs.Dwarf_uint16('')))
+    add('DW_OP_call4', parse_arg_struct(structs.Dwarf_uint32('')))
+    add('DW_OP_call_ref', parse_arg_struct(structs.Dwarf_offset('')))
     add('DW_OP_implicit_value', parse_blob())
     add('DW_OP_entry_value', parse_nestedexpr())
     add('DW_OP_const_type', parse_typedblob())
-    add('DW_OP_regval_type', parse_arg_struct2(structs.the_Dwarf_uleb128,
-                                                   structs.the_Dwarf_uleb128))
-    add('DW_OP_deref_type', parse_arg_struct2(structs.the_Dwarf_uint8,
-                                              structs.the_Dwarf_uleb128))
-    add('DW_OP_implicit_pointer', parse_arg_struct2(structs.the_Dwarf_offset,
-                                                        structs.the_Dwarf_sleb128))
+    add('DW_OP_regval_type', parse_arg_struct2(structs.Dwarf_uleb128(''),
+                                                   structs.Dwarf_uleb128('')))
+    add('DW_OP_deref_type', parse_arg_struct2(structs.Dwarf_uint8(''),
+                                              structs.Dwarf_uleb128('')))
+    add('DW_OP_implicit_pointer', parse_arg_struct2(structs.Dwarf_offset(''),
+                                                        structs.Dwarf_sleb128('')))
+    add('DW_OP_convert', parse_arg_struct(structs.Dwarf_uleb128('')))
     add('DW_OP_GNU_entry_value', parse_nestedexpr())
     add('DW_OP_GNU_const_type', parse_typedblob())
-    add('DW_OP_GNU_regval_type', parse_arg_struct2(structs.the_Dwarf_uleb128,
-                                                   structs.the_Dwarf_uleb128))
-    add('DW_OP_GNU_deref_type', parse_arg_struct2(structs.the_Dwarf_uint8,
-                                                   structs.the_Dwarf_uleb128))
-    add('DW_OP_GNU_implicit_pointer', parse_arg_struct2(structs.the_Dwarf_offset,
-                                                        structs.the_Dwarf_sleb128))
-    add('DW_OP_GNU_parameter_ref', parse_arg_struct(structs.the_Dwarf_offset))
+    add('DW_OP_GNU_regval_type', parse_arg_struct2(structs.Dwarf_uleb128(''),
+                                                   structs.Dwarf_uleb128('')))
+    add('DW_OP_GNU_deref_type', parse_arg_struct2(structs.Dwarf_uint8(''),
+                                                   structs.Dwarf_uleb128('')))
+    add('DW_OP_GNU_implicit_pointer', parse_arg_struct2(structs.Dwarf_offset(''),
+                                                        structs.Dwarf_sleb128('')))
+    add('DW_OP_GNU_parameter_ref', parse_arg_struct(structs.Dwarf_offset('')))
+    add('DW_OP_GNU_convert', parse_arg_struct(structs.Dwarf_uleb128('')))
     add('DW_OP_WASM_location', parse_wasmloc())
 
     return table

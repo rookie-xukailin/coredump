@@ -1,58 +1,34 @@
-from __future__ import annotations
+from .binary import encode_bin, decode_bin
 
-import io
-from typing import IO, TYPE_CHECKING
+class BitStreamReader(object):
 
-from .binary import decode_bin, encode_bin
+    __slots__ = ["substream", "buffer", "total_size"]
 
-if TYPE_CHECKING:
-    from typing_extensions import (
-        Buffer,  # 3.12+
-        Self,  # 3.11+
-    )
-
-
-class BitStream(io.RawIOBase, IO[bytes]):
-
-    __slots__ = ("substream",)
-
-    def __init__(self, substream: IO[bytes]) -> None:
+    def __init__(self, substream):
         self.substream = substream
-
-    def __enter__(self) -> Self:
-        return self
-
-
-class BitStreamReader(BitStream):
-
-    __slots__ = ("buffer", "total_size")
-
-    def __init__(self, substream: IO[bytes]) -> None:
-        super().__init__(substream)
         self.total_size = 0
-        self.buffer = b""
+        self.buffer = ""
 
-    def close(self) -> None:
+    def close(self):
         if self.total_size % 8 != 0:
             raise ValueError("total size of read data must be a multiple of 8",
                 self.total_size)
 
-    def tell(self) -> int:
+    def tell(self):
         return self.substream.tell()
 
-    def seek(self, pos: int, whence: int = 0) -> int:
-        self.buffer = b""
+    def seek(self, pos, whence = 0):
+        self.buffer = ""
         self.total_size = 0
         self.substream.seek(pos, whence)
-        return 0
 
-    def read(self, count: int = -1) -> bytes:
+    def read(self, count):
         if count < 0:
             raise ValueError("count cannot be negative")
 
         l = len(self.buffer)
         if count == 0:
-            data = b""
+            data = ""
         elif count <= l:
             data = self.buffer[:count]
             self.buffer = self.buffer[count:]
@@ -68,36 +44,34 @@ class BitStreamReader(BitStream):
         self.total_size += len(data)
         return data
 
+class BitStreamWriter(object):
 
-class BitStreamWriter(BitStream):
+    __slots__ = ["substream", "buffer", "pos"]
 
-    __slots__ = ("buffer", "pos")
-
-    def __init__(self, substream: IO[bytes]) -> None:
-        super().__init__(substream)
-        self.buffer: list[bytes] = []
+    def __init__(self, substream):
+        self.substream = substream
+        self.buffer = []
         self.pos = 0
 
-    def close(self) -> None:
+    def close(self):
         self.flush()
 
-    def flush(self) -> None:
-        bytes = decode_bin(b"".join(self.buffer))
+    def flush(self):
+        bytes = decode_bin("".join(self.buffer))
         self.substream.write(bytes)
         self.buffer = []
         self.pos = 0
 
-    def tell(self) -> int:
+    def tell(self):
         return self.substream.tell() + self.pos // 8
 
-    def seek(self, pos: int, whence: int = 0) -> int:
+    def seek(self, pos, whence = 0):
         self.flush()
-        return self.substream.seek(pos, whence)
+        self.substream.seek(pos, whence)
 
-    def write(self, data: Buffer) -> int:
+    def write(self, data):
         if not data:
-            return 0
-        if type(data) is not bytes:
-            raise TypeError(f"data must be a bytes, not {type(data)!r}")
+            return
+        if type(data) is not str:
+            raise TypeError("data must be a string, not %r" % (type(data),))
         self.buffer.append(data)
-        return len(data)

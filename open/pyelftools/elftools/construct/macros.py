@@ -1,123 +1,18 @@
-from __future__ import annotations
-
-from sys import maxsize
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
-
-from .adapters import (
-    BitIntegerAdapter,
-    ConstAdapter,
-    CStringAdapter,
-    FlagsAdapter,
-    IndexingAdapter,
-    LengthValueAdapter,
-    MappingAdapter,
-    PaddedStringAdapter,
-    PaddingAdapter,
-    StringAdapter,
-)
-from .core import (
-    Buffered,
-    FormatField,
-    MetaArray,
-    MetaField,
-    OnDemand,
-    Pass,
-    Pointer,
-    Range,
-    Reconfig,
-    RepeatUntil,
-    Restream,
-    Select,
-    Sequence,
-    SizeofError,
-    StaticField,
-    Struct,
-    Switch,
-    Value,
-)
-from .lib import BitStreamReader, BitStreamWriter, Container, decode_bin, encode_bin
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Hashable, Mapping
-
-    from typing_extensions import Unpack  # Py3.11+
-
-    from .adapters import Adapter
-    from .core import Construct, Subconstruct, _Pass
-
-    Length = int | Callable[[Container], int]
-
-
-__all__ = [
-    "Alias",
-    "Aligned",
-    "AlignedStruct",
-    "Array",
-    "BFloat32",
-    "BFloat64",
-    "Bit",
-    "BitField",
-    "BitStruct",
-    "Bitwise",
-    "CString",
-    "Embedded",
-    "EmbeddedBitStruct",
-    "Enum",
-    "Field",
-    "Flag",
-    "FlagsEnum",
-    "GreedyRange",
-    "If",
-    "IfThenElse",
-    "LFloat32",
-    "LFloat64",
-    "Magic",
-    "NFloat32",
-    "NFloat64",
-    "Nibble",
-    "Octet",
-    "OnDemandPointer",
-    "OpenRange",
-    "Optional",
-    "OptionalGreedyRange",
-    "Padding",
-    "PascalString",
-    "PrefixedArray",
-    "Rename",
-    "SBInt8",
-    "SBInt16",
-    "SBInt32",
-    "SBInt64",
-    "SLInt8",
-    "SLInt16",
-    "SLInt32",
-    "SLInt64",
-    "SNInt8",
-    "SNInt16",
-    "SNInt32",
-    "SNInt64",
-    "SeqOfOne",
-    "String",
-    "SymmetricMapping",
-    "UBInt8",
-    "UBInt16",
-    "UBInt32",
-    "UBInt64",
-    "ULInt8",
-    "ULInt16",
-    "ULInt32",
-    "ULInt64",
-    "UNInt8",
-    "UNInt16",
-    "UNInt32",
-    "UNInt64",
-]
+from .lib.py3compat import int2byte
+from .lib import (BitStreamReader, BitStreamWriter, encode_bin,
+    decode_bin)
+from .core import (Struct, MetaField, StaticField, FormatField,
+    OnDemand, Pointer, Switch, Value, RepeatUntil, MetaArray, Sequence, Range,
+    Select, Pass, SizeofError, Buffered, Restream, Reconfig)
+from .adapters import (BitIntegerAdapter, PaddingAdapter,
+    ConstAdapter, CStringAdapter, LengthValueAdapter, IndexingAdapter,
+    PaddedStringAdapter, FlagsAdapter, StringAdapter, MappingAdapter)
 
 
 #===============================================================================
 # fields
 #===============================================================================
-def Field(name: str | None, length: Length) -> MetaField | StaticField:
+def Field(name, length):
     """
     A field consisting of a specified number of bytes.
 
@@ -126,13 +21,13 @@ def Field(name: str | None, length: Length) -> MetaField | StaticField:
       (StaticField), or a function that takes the context as an argument and
       returns the length (MetaField)
     """
-    if isinstance(length, int):
-        return StaticField(name, length)
-    else:
+    if callable(length):
         return MetaField(name, length)
+    else:
+        return StaticField(name, length)
 
-def BitField(name: str, length: Length, swapped: bool = False, signed: bool = False, bytesize: int = 8) -> BitIntegerAdapter:
-    r"""
+def BitField(name, length, swapped = False, signed = False, bytesize = 8):
+    """
     BitFields, as the name suggests, are fields that operate on raw, unaligned
     bits, and therefore must be enclosed in a BitStruct. Using them is very
     similar to all normal fields: they take a name and a length (in bits).
@@ -151,8 +46,8 @@ def BitField(name: str, length: Length, swapped: bool = False, signed: bool = Fa
     ...     Nibble("c"),
     ...     BitField("d", 5),
     ... )
-    >>> foo.parse(b"\xe1\x1f")
-    Container({'a': 7, 'b': False, 'c': 8, 'd': 31})
+    >>> foo.parse("\\xe1\\x1f")
+    Container(a = 7, b = False, c = 8, d = 31)
     >>> foo = BitStruct("foo",
     ...     BitField("a", 3),
     ...     Flag("b"),
@@ -163,11 +58,10 @@ def BitField(name: str, length: Length, swapped: bool = False, signed: bool = Fa
     ...             Bit("e"),
     ...     )
     ... )
-    >>> foo.parse(b"\xe1\x1f")
-    Container({'a': 7, 'b': False, 'c': 8, 'bar': Container({'d': 15, 'e': 1})})
+    >>> foo.parse("\\xe1\\x1f")
+    Container(a = 7, b = False, bar = Container(d = 15, e = 1), c = 8)
     """
 
-    assert isinstance(length, int)  # FIXME: Field(len=f()) is supported, but not BitIntegerAdapter(width=f())
     return BitIntegerAdapter(Field(name, length),
         length,
         swapped=swapped,
@@ -175,7 +69,7 @@ def BitField(name: str, length: Length, swapped: bool = False, signed: bool = Fa
         bytesize=bytesize
     )
 
-def Padding(length: Length, pattern: bytes = b"\x00", strict: bool = False) -> PaddingAdapter:
+def Padding(length, pattern = b"\x00", strict = False):
     r"""a padding field (value is discarded)
     * length - the length of the field. the length can be either an integer,
       or a function that takes the context as an argument and returns the
@@ -189,7 +83,7 @@ def Padding(length: Length, pattern: bytes = b"\x00", strict: bool = False) -> P
         strict = strict,
     )
 
-def Flag(name: str, truth: int = 1, falsehood: int = 0, default: bool = False) -> MappingAdapter:
+def Flag(name, truth = 1, falsehood = 0, default = False):
     """
     A flag.
 
@@ -209,118 +103,118 @@ def Flag(name: str, truth: int = 1, falsehood: int = 0, default: bool = False) -
     """
 
     return SymmetricMapping(Field(name, 1),
-        {True : bytes((truth,)), False : bytes((falsehood,))},
+        {True : int2byte(truth), False : int2byte(falsehood)},
         default = default,
     )
 
 #===============================================================================
 # field shortcuts
 #===============================================================================
-def Bit(name: str) -> BitIntegerAdapter:
+def Bit(name):
     """a 1-bit BitField; must be enclosed in a BitStruct"""
     return BitField(name, 1)
-def Nibble(name: str) -> BitIntegerAdapter:
+def Nibble(name):
     """a 4-bit BitField; must be enclosed in a BitStruct"""
     return BitField(name, 4)
-def Octet(name: str) -> BitIntegerAdapter:
+def Octet(name):
     """an 8-bit BitField; must be enclosed in a BitStruct"""
     return BitField(name, 8)
 
-def UBInt8(name: str) -> FormatField[int]:
+def UBInt8(name):
     """unsigned, big endian 8-bit integer"""
     return FormatField(name, ">", "B")
-def UBInt16(name: str) -> FormatField[int]:
+def UBInt16(name):
     """unsigned, big endian 16-bit integer"""
     return FormatField(name, ">", "H")
-def UBInt32(name: str) -> FormatField[int]:
+def UBInt32(name):
     """unsigned, big endian 32-bit integer"""
     return FormatField(name, ">", "L")
-def UBInt64(name: str) -> FormatField[int]:
+def UBInt64(name):
     """unsigned, big endian 64-bit integer"""
     return FormatField(name, ">", "Q")
 
-def SBInt8(name: str) -> FormatField[int]:
+def SBInt8(name):
     """signed, big endian 8-bit integer"""
     return FormatField(name, ">", "b")
-def SBInt16(name: str) -> FormatField[int]:
+def SBInt16(name):
     """signed, big endian 16-bit integer"""
     return FormatField(name, ">", "h")
-def SBInt32(name: str) -> FormatField[int]:
+def SBInt32(name):
     """signed, big endian 32-bit integer"""
     return FormatField(name, ">", "l")
-def SBInt64(name: str) -> FormatField[int]:
+def SBInt64(name):
     """signed, big endian 64-bit integer"""
     return FormatField(name, ">", "q")
 
-def ULInt8(name: str) -> FormatField[int]:
+def ULInt8(name):
     """unsigned, little endian 8-bit integer"""
     return FormatField(name, "<", "B")
-def ULInt16(name: str) -> FormatField[int]:
+def ULInt16(name):
     """unsigned, little endian 16-bit integer"""
     return FormatField(name, "<", "H")
-def ULInt32(name: str) -> FormatField[int]:
+def ULInt32(name):
     """unsigned, little endian 32-bit integer"""
     return FormatField(name, "<", "L")
-def ULInt64(name: str) -> FormatField[int]:
+def ULInt64(name):
     """unsigned, little endian 64-bit integer"""
     return FormatField(name, "<", "Q")
 
-def SLInt8(name: str) -> FormatField[int]:
+def SLInt8(name):
     """signed, little endian 8-bit integer"""
     return FormatField(name, "<", "b")
-def SLInt16(name: str) -> FormatField[int]:
+def SLInt16(name):
     """signed, little endian 16-bit integer"""
     return FormatField(name, "<", "h")
-def SLInt32(name: str) -> FormatField[int]:
+def SLInt32(name):
     """signed, little endian 32-bit integer"""
     return FormatField(name, "<", "l")
-def SLInt64(name: str) -> FormatField[int]:
+def SLInt64(name):
     """signed, little endian 64-bit integer"""
     return FormatField(name, "<", "q")
 
-def UNInt8(name: str) -> FormatField[int]:
+def UNInt8(name):
     """unsigned, native endianity 8-bit integer"""
     return FormatField(name, "=", "B")
-def UNInt16(name: str) -> FormatField[int]:
+def UNInt16(name):
     """unsigned, native endianity 16-bit integer"""
     return FormatField(name, "=", "H")
-def UNInt32(name: str) -> FormatField[int]:
+def UNInt32(name):
     """unsigned, native endianity 32-bit integer"""
     return FormatField(name, "=", "L")
-def UNInt64(name: str) -> FormatField[int]:
+def UNInt64(name):
     """unsigned, native endianity 64-bit integer"""
     return FormatField(name, "=", "Q")
 
-def SNInt8(name: str) -> FormatField[int]:
+def SNInt8(name):
     """signed, native endianity 8-bit integer"""
     return FormatField(name, "=", "b")
-def SNInt16(name: str) -> FormatField[int]:
+def SNInt16(name):
     """signed, native endianity 16-bit integer"""
     return FormatField(name, "=", "h")
-def SNInt32(name: str) -> FormatField[int]:
+def SNInt32(name):
     """signed, native endianity 32-bit integer"""
     return FormatField(name, "=", "l")
-def SNInt64(name: str) -> FormatField[int]:
+def SNInt64(name):
     """signed, native endianity 64-bit integer"""
     return FormatField(name, "=", "q")
 
-def BFloat32(name: str) -> FormatField[float]:
+def BFloat32(name):
     """big endian, 32-bit IEEE floating point number"""
     return FormatField(name, ">", "f")
-def LFloat32(name: str) -> FormatField[float]:
+def LFloat32(name):
     """little endian, 32-bit IEEE floating point number"""
     return FormatField(name, "<", "f")
-def NFloat32(name: str) -> FormatField[float]:
+def NFloat32(name):
     """native endianity, 32-bit IEEE floating point number"""
     return FormatField(name, "=", "f")
 
-def BFloat64(name: str) -> FormatField[float]:
+def BFloat64(name):
     """big endian, 64-bit IEEE floating point number"""
     return FormatField(name, ">", "d")
-def LFloat64(name: str) -> FormatField[float]:
+def LFloat64(name):
     """little endian, 64-bit IEEE floating point number"""
     return FormatField(name, "<", "d")
-def NFloat64(name: str) -> FormatField[float]:
+def NFloat64(name):
     """native endianity, 64-bit IEEE floating point number"""
     return FormatField(name, "=", "d")
 
@@ -328,99 +222,95 @@ def NFloat64(name: str) -> FormatField[float]:
 #===============================================================================
 # arrays
 #===============================================================================
-def Array(count: Length, subcon: Construct) -> MetaArray:
-    r"""
+def Array(count, subcon):
+    """
     Repeats the given unit a fixed number of times.
 
     :param int count: number of times to repeat
     :param ``Construct`` subcon: construct to repeat
 
     >>> c = Array(4, UBInt8("foo"))
-    >>> c.parse(b"\x01\x02\x03\x04")
+    >>> c.parse("\\x01\\x02\\x03\\x04")
     [1, 2, 3, 4]
-    >>> c.parse(b"\x01\x02\x03\x04\x05\x06")
+    >>> c.parse("\\x01\\x02\\x03\\x04\\x05\\x06")
     [1, 2, 3, 4]
     >>> c.build([5,6,7,8])
-    b'\x05\x06\x07\x08'
-    >>> c.build([5,6,7,8,9])  # doctest: +IGNORE_EXCEPTION_DETAIL
+    '\\x05\\x06\\x07\\x08'
+    >>> c.build([5,6,7,8,9])
     Traceback (most recent call last):
       ...
-    ArrayError: expected 4, found 5
+    construct.core.RangeError: expected 4..4, found 5
     """
 
-    if isinstance(count, int):
+    if callable(count):
+        con = MetaArray(count, subcon)
+    else:
         con = MetaArray(lambda ctx: count, subcon)
         con._clear_flag(con.FLAG_DYNAMIC)
-    else:
-        con = MetaArray(count, subcon)
     return con
 
-def PrefixedArray(
-    subcon: Construct,
-    length_field: Construct = UBInt8("length"),  # noqa: B008 - public API default
-) -> LengthValueAdapter:
+def PrefixedArray(subcon, length_field = UBInt8("length")):
     """an array prefixed by a length field.
     * subcon - the subcon to be repeated
     * length_field - a construct returning an integer
     """
-    assert length_field.name is not None
-    name = length_field.name
     return LengthValueAdapter(
         Sequence(subcon.name,
             length_field,
-            Array(lambda ctx: ctx[name], subcon),
+            Array(lambda ctx: ctx[length_field.name], subcon),
             nested = False
         )
     )
 
-def OpenRange(mincount: int, subcon: Construct) -> Range:
+def OpenRange(mincount, subcon):
+    from sys import maxsize
     return Range(mincount, maxsize, subcon)
 
-def GreedyRange(subcon: Construct) -> Range:
-    r"""
+def GreedyRange(subcon):
+    """
     Repeats the given unit one or more times.
 
     :param ``Construct`` subcon: construct to repeat
 
-    >>> from ..construct import GreedyRange, UBInt8
+    >>> from construct import GreedyRange, UBInt8
     >>> c = GreedyRange(UBInt8("foo"))
-    >>> c.parse(b"\x01")
+    >>> c.parse("\\x01")
     [1]
-    >>> c.parse(b"\x01\x02\x03")
+    >>> c.parse("\\x01\\x02\\x03")
     [1, 2, 3]
-    >>> c.parse(b"\x01\x02\x03\x04\x05\x06")
+    >>> c.parse("\\x01\\x02\\x03\\x04\\x05\\x06")
     [1, 2, 3, 4, 5, 6]
-    >>> c.parse(b"")  # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> c.parse("")
     Traceback (most recent call last):
       ...
-    RangeError: expected 1..2147483647, found 0
+    construct.core.RangeError: expected 1..2147483647, found 0
     >>> c.build([1,2])
-    b'\x01\x02'
-    >>> c.build([])  # doctest: +IGNORE_EXCEPTION_DETAIL
+    '\\x01\\x02'
+    >>> c.build([])
     Traceback (most recent call last):
       ...
-    RangeError: expected 1..2147483647, found 0
+    construct.core.RangeError: expected 1..2147483647, found 0
     """
 
     return OpenRange(1, subcon)
 
-def OptionalGreedyRange(subcon: Construct) -> Range:
-    r"""
+def OptionalGreedyRange(subcon):
+    """
     Repeats the given unit zero or more times. This repeater can't
     fail, as it accepts lists of any length.
 
     :param ``Construct`` subcon: construct to repeat
 
-    >>> from ..construct import OptionalGreedyRange, UBInt8
+    >>> from construct import OptionalGreedyRange, UBInt8
     >>> c = OptionalGreedyRange(UBInt8("foo"))
-    >>> c.parse(b"")
+    >>> c.parse("")
     []
-    >>> c.parse(b"\x01\x02")
+    >>> c.parse("\\x01\\x02")
     [1, 2]
     >>> c.build([])
-    b''
+    ''
     >>> c.build([1,2])
-    b'\x01\x02'
+    '\\x01\\x02'
     """
 
     return OpenRange(0, subcon)
@@ -429,25 +319,25 @@ def OptionalGreedyRange(subcon: Construct) -> Range:
 #===============================================================================
 # subconstructs
 #===============================================================================
-def Optional(subcon: Construct) -> Select:
+def Optional(subcon):
     """an optional construct. if parsing fails, returns None.
     * subcon - the subcon to optionally parse or build
     """
     return Select(subcon.name, subcon, Pass)
 
-def Bitwise(subcon: Construct) -> Subconstruct:
+def Bitwise(subcon):
     """converts the stream to bits, and passes the bitstream to subcon
     * subcon - a bitwise construct (usually BitField)
     """
     # subcons larger than MAX_BUFFER will be wrapped by Restream instead
     # of Buffered. implementation details, don't stick your nose in :)
     MAX_BUFFER = 1024 * 8
-    def resizer(length: int) -> int:
+    def resizer(length):
         if length & 7:
             raise SizeofError("size must be a multiple of 8", length)
         return length >> 3
     if not subcon._is_flag(subcon.FLAG_DYNAMIC) and subcon.sizeof() < MAX_BUFFER:
-        con: Subconstruct = Buffered(subcon,
+        con = Buffered(subcon,
             encoder = decode_bin,
             decoder = encode_bin,
             resizer = resizer
@@ -459,7 +349,7 @@ def Bitwise(subcon: Construct) -> Subconstruct:
             resizer = resizer)
     return con
 
-def Aligned(subcon: Construct, modulus: int = 4, pattern: bytes = b"\x00") -> IndexingAdapter:
+def Aligned(subcon, modulus = 4, pattern = b"\x00"):
     r"""aligns subcon to modulus boundary using padding pattern
     * subcon - the subcon to align
     * modulus - the modulus boundary (default is 4)
@@ -467,7 +357,7 @@ def Aligned(subcon: Construct, modulus: int = 4, pattern: bytes = b"\x00") -> In
     """
     if modulus < 2:
         raise ValueError("modulus must be >= 2", modulus)
-    def padlength(ctx: Container) -> int:
+    def padlength(ctx):
         return (modulus - (subcon._sizeof(ctx) % modulus)) % modulus
     return SeqOfOne(subcon.name,
         subcon,
@@ -479,7 +369,7 @@ def Aligned(subcon: Construct, modulus: int = 4, pattern: bytes = b"\x00") -> In
         nested = False,
     )
 
-def SeqOfOne(name: str | None, *args: Construct, **kw: bool) -> IndexingAdapter:
+def SeqOfOne(name, *args, **kw):
     """a sequence of one element. only the first element is meaningful, the
     rest are discarded
     * name - the name of the sequence
@@ -488,20 +378,20 @@ def SeqOfOne(name: str | None, *args: Construct, **kw: bool) -> IndexingAdapter:
     """
     return IndexingAdapter(Sequence(name, *args, **kw), index = 0)
 
-def Embedded(subcon: Construct) -> Reconfig:
+def Embedded(subcon):
     """embeds a struct into the enclosing struct.
     * subcon - the struct to embed
     """
     return Reconfig(subcon.name, subcon, subcon.FLAG_EMBED)
 
-def Rename(newname: str, subcon: Construct) -> Reconfig:
+def Rename(newname, subcon):
     """renames an existing construct
     * newname - the new name
     * subcon - the subcon to rename
     """
     return Reconfig(newname, subcon)
 
-def Alias(newname: str, oldname: str) -> Value[Any]:
+def Alias(newname, oldname):
     """creates an alias for an existing element in a struct
     * newname - the new name
     * oldname - the name of an existing element
@@ -512,7 +402,7 @@ def Alias(newname: str, oldname: str) -> Value[Any]:
 #===============================================================================
 # mapping
 #===============================================================================
-def SymmetricMapping(subcon: Construct, mapping: Mapping[Any, Any], default: Hashable | _Pass = NotImplemented) -> MappingAdapter:
+def SymmetricMapping(subcon, mapping, default = NotImplemented):
     """defines a symmetrical mapping: a->b, b->a.
     * subcon - the subcon to map
     * mapping - the encoding mapping (a dict); the decoding mapping is
@@ -521,7 +411,7 @@ def SymmetricMapping(subcon: Construct, mapping: Mapping[Any, Any], default: Has
       default value is given, and exception is raised. setting to Pass would
       return the value "as is" (unmapped)
     """
-    reversed_mapping = {v: k for k, v in mapping.items()}
+    reversed_mapping = dict((v, k) for k, v in mapping.items())
     return MappingAdapter(subcon,
         encoding = mapping,
         decoding = reversed_mapping,
@@ -529,7 +419,7 @@ def SymmetricMapping(subcon: Construct, mapping: Mapping[Any, Any], default: Has
         decdefault = default,
     )
 
-def Enum(subcon: Construct, **kw: Any) -> MappingAdapter:
+def Enum(subcon, **kw):
     """a set of named values mapping.
     * subcon - the subcon to map
     * kw - keyword arguments which serve as the encoding mapping
@@ -540,7 +430,7 @@ def Enum(subcon: Construct, **kw: Any) -> MappingAdapter:
     """
     return SymmetricMapping(subcon, kw, kw.pop("_default_", NotImplemented))
 
-def FlagsEnum(subcon: Construct, **kw: Any) -> FlagsAdapter:
+def FlagsEnum(subcon, **kw):
     """a set of flag values mapping.
     * subcon - the subcon to map
     * kw - keyword arguments which serve as the encoding mapping
@@ -551,12 +441,7 @@ def FlagsEnum(subcon: Construct, **kw: Any) -> FlagsAdapter:
 #===============================================================================
 # structs
 #===============================================================================
-class _AlignedStruct(TypedDict, total=False):
-    modulus: int
-    pattern: bytes
-
-
-def AlignedStruct(name: str, *subcons: Construct, **kw: Unpack[_AlignedStruct]) -> Struct:
+def AlignedStruct(name, *subcons, **kw):
     """a struct of aligned fields
     * name - the name of the struct
     * subcons - the subcons that make up this structure
@@ -564,14 +449,14 @@ def AlignedStruct(name: str, *subcons: Construct, **kw: Unpack[_AlignedStruct]) 
     """
     return Struct(name, *(Aligned(sc, **kw) for sc in subcons))
 
-def BitStruct(name: str, *subcons: Construct) -> Subconstruct:
+def BitStruct(name, *subcons):
     """a struct of bitwise fields
     * name - the name of the struct
     * subcons - the subcons that make up this structure
     """
     return Bitwise(Struct(name, *subcons))
 
-def EmbeddedBitStruct(*subcons: Construct) -> Subconstruct:
+def EmbeddedBitStruct(*subcons):
     """an embedded BitStruct. no name is necessary.
     * subcons - the subcons that make up this structure
     """
@@ -580,9 +465,9 @@ def EmbeddedBitStruct(*subcons: Construct) -> Subconstruct:
 #===============================================================================
 # strings
 #===============================================================================
-def String(name: str, length: int, encoding: str | None = None, padchar: bytes | None = None, paddir: Literal["right", "left", "center"] = "right",
-        trimdir: Literal["right", "left"] = "right") -> Adapter:
-    r"""
+def String(name, length, encoding=None, padchar=None, paddir="right",
+    trimdir="right"):
+    """
     A configurable, fixed-length string field.
 
     The padding character must be specified for padding and trimming to work.
@@ -590,37 +475,33 @@ def String(name: str, length: int, encoding: str | None = None, padchar: bytes |
     :param str name: name
     :param int length: length, in bytes
     :param str encoding: encoding (e.g. "utf8") or None for no encoding
-    :param bytes padchar: optional character to pad out strings
+    :param str padchar: optional character to pad out strings
     :param str paddir: direction to pad out strings; one of "right", "left",
-                       or "center"
+                       or "both"
     :param str trim: direction to trim strings; one of "right", "left"
 
-    >>> from ..construct import String
-    >>> String("foo", 5).parse(b"hello")
-    b'hello'
+    >>> from construct import String
+    >>> String("foo", 5).parse("hello")
+    'hello'
     >>>
-    >>> String("foo", 12, encoding="utf8").parse(b"hello joh\xd4\x83n")
-    'hello joh\u0503n'
+    >>> String("foo", 12, encoding = "utf8").parse("hello joh\\xd4\\x83n")
+    u'hello joh\\u0503n'
     >>>
-    >>> foo = String("foo", 10, padchar=b"X", paddir="right")
-    >>> foo.parse(b"helloXXXXX")
-    b'hello'
-    >>> foo.build(b"hello")
-    b'helloXXXXX'
+    >>> foo = String("foo", 10, padchar = "X", paddir = "right")
+    >>> foo.parse("helloXXXXX")
+    'hello'
+    >>> foo.build("hello")
+    'helloXXXXX'
     """
 
-    con: Adapter = StringAdapter(Field(name, length), encoding=encoding)
+    con = StringAdapter(Field(name, length), encoding=encoding)
     if padchar is not None:
         con = PaddedStringAdapter(con, padchar=padchar, paddir=paddir,
             trimdir=trimdir)
     return con
 
-def PascalString(
-    name: str,
-    length_field: FormatField[int] = UBInt8("length"),  # noqa: B008 - public API
-    encoding: str | None = None,
-) -> StringAdapter:
-    r"""
+def PascalString(name, length_field=UBInt8("length"), encoding=None):
+    """
     A length-prefixed string.
 
     ``PascalString`` is named after the string types of Pascal, which are
@@ -635,16 +516,16 @@ def PascalString(
     :param str encoding: encoding (e.g. "utf8") or None for no encoding
 
     >>> foo = PascalString("foo")
-    >>> foo.parse(b"\x05hello")
-    b'hello'
-    >>> foo.build(b"hello world")
-    b'\x0bhello world'
+    >>> foo.parse("\\x05hello")
+    'hello'
+    >>> foo.build("hello world")
+    '\\x0bhello world'
     >>>
     >>> foo = PascalString("foo", length_field = UBInt16("length"))
-    >>> foo.parse(b"\x00\x05hello")
-    b'hello'
-    >>> foo.build(b"hello")
-    b'\x00\x05hello'
+    >>> foo.parse("\\x00\\x05hello")
+    'hello'
+    >>> foo.build("hello")
+    '\\x00\\x05hello'
     """
 
     return StringAdapter(
@@ -657,10 +538,9 @@ def PascalString(
         encoding=encoding,
     )
 
-def CString(name: str, terminators: bytes = b"\x00", encoding: str | None = None,
-        char_field: Construct = Field(None, 1),  # noqa: B008 - public API default
-        ) -> Reconfig:
-    r"""
+def CString(name, terminators=b"\x00", encoding=None,
+            char_field=Field(None, 1)):
+    """
     A string ending in a terminator.
 
     ``CString`` is similar to the strings of C, C++, and other related
@@ -675,10 +555,10 @@ def CString(name: str, terminators: bytes = b"\x00", encoding: str | None = None
     :param ``Construct`` char_field: construct representing a single character
 
     >>> foo = CString("foo")
-    >>> foo.parse(b"hello\x00")
+    >>> foo.parse(b"hello\\x00")
     b'hello'
     >>> foo.build(b"hello")
-    b'hello\x00'
+    b'hello\\x00'
     >>> foo = CString("foo", terminators = b"XYZ")
     >>> foo.parse(b"helloX")
     b'hello'
@@ -702,7 +582,7 @@ def CString(name: str, terminators: bytes = b"\x00", encoding: str | None = None
 #===============================================================================
 # conditional
 #===============================================================================
-def IfThenElse(name: str | None, predicate: Callable[[Container], bool], then_subcon: Construct, else_subcon: Construct) -> Switch[bool]:
+def IfThenElse(name, predicate, then_subcon, else_subcon):
     """an if-then-else conditional construct: if the predicate indicates True,
     `then_subcon` will be used; otherwise `else_subcon`
     * name - the name of the construct
@@ -718,7 +598,7 @@ def IfThenElse(name: str | None, predicate: Callable[[Container], bool], then_su
         }
     )
 
-def If(predicate: Callable[[Container], bool], subcon: Construct, elsevalue: object | None = None) -> Switch[bool]:
+def If(predicate, subcon, elsevalue = None):
     """an if-then conditional construct: if the predicate indicates True,
     subcon will be used; otherwise, `elsevalue` will be returned instead.
     * predicate - a function taking the context as an argument and returning
@@ -737,7 +617,7 @@ def If(predicate: Callable[[Container], bool], subcon: Construct, elsevalue: obj
 #===============================================================================
 # misc
 #===============================================================================
-def OnDemandPointer(offsetfunc: Callable[[Container], int], subcon: Construct, force_build: bool = True) -> OnDemand:
+def OnDemandPointer(offsetfunc, subcon, force_build = True):
     """an on-demand pointer.
     * offsetfunc - a function taking the context as an argument and returning
       the absolute stream position
@@ -750,5 +630,5 @@ def OnDemandPointer(offsetfunc: Callable[[Container], int], subcon: Construct, f
         force_build = force_build
     )
 
-def Magic(data: bytes) -> ConstAdapter:
+def Magic(data):
     return ConstAdapter(Field(None, len(data)), data)

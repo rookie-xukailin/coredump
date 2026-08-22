@@ -7,26 +7,17 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 from ..common.utils import bytes2str
 
-if TYPE_CHECKING:
-    from .die import DIE
+cpp_symbols = dict(
+    pointer   = "*",
+    reference = "&",
+    const     = "const")
 
-
-cpp_symbols = {
-    "pointer": "*",
-    "reference": "&",
-    "const": "const",
-    "volatile": "volatile"}
-
-def describe_cpp_datatype(var_die: DIE) -> str:
+def describe_cpp_datatype(var_die):
     return str(parse_cpp_datatype(var_die))
 
-def parse_cpp_datatype(var_die: DIE) -> TypeDesc:
+def parse_cpp_datatype(var_die):
     """Given a DIE that describes a variable, a parameter, or a member
     with DW_AT_type in it, tries to return the C++ datatype as a string
 
@@ -37,18 +28,18 @@ def parse_cpp_datatype(var_die: DIE) -> TypeDesc:
     """
     t = TypeDesc()
 
-    if 'DW_AT_type' not in var_die.attributes:
+    if not 'DW_AT_type' in var_die.attributes:
         t.tag = ''
         return t
 
     type_die = var_die.get_DIE_from_attribute('DW_AT_type')
 
-    mods: list[str] = []
+    mods = []
     # Unlike readelf, dwarfdump doesn't chase typedefs
-    while type_die.tag in ('DW_TAG_const_type', 'DW_TAG_volatile_type', 'DW_TAG_pointer_type', 'DW_TAG_reference_type'):
-        modifier = _strip_type_tag(type_die) # const/volatile/reference/pointer
+    while type_die.tag in ('DW_TAG_const_type', 'DW_TAG_pointer_type', 'DW_TAG_reference_type'):
+        modifier = _strip_type_tag(type_die) # const/reference/pointer
         mods.insert(0, modifier)
-        if 'DW_AT_type' not in type_die.attributes: # void* is encoded as a pointer to nothing
+        if not 'DW_AT_type' in type_die.attributes: # void* is encoded as a pointer to nothing
             t.name = t.tag = "void"
             t.modifiers = tuple(mods)
             return t
@@ -68,26 +59,23 @@ def parse_cpp_datatype(var_die: DIE) -> TypeDesc:
             ptr_prefix = ''
 
         if t.tag == 'subroutine':
-            params = ", ".join(
-                format_function_param(p, p)
-                for p in type_die.iter_children()
-                if p.tag in ("DW_TAG_formal_parameter", "DW_TAG_unspecified_parameters") and 'DW_AT_artificial' not in p.attributes
-            )
+            params = tuple(format_function_param(p, p) for p in type_die.iter_children() if p.tag in ("DW_TAG_formal_parameter", "DW_TAG_unspecified_parameters") and 'DW_AT_artificial' not in p.attributes)
+            params = ", ".join(params)
             if 'DW_AT_type' in type_die.attributes:
-                datatype = parse_cpp_datatype(type_die)
-                is_pointer = datatype.modifiers and datatype.modifiers[-1] == 'pointer'
-                retval_type = str(datatype)
+                retval_type = parse_cpp_datatype(type_die)
+                is_pointer = retval_type.modifiers and retval_type.modifiers[-1] == 'pointer'
+                retval_type = str(retval_type)
                 if not is_pointer:
                     retval_type += " "
             else:
                 retval_type = "void "
 
-            if mods and mods[-1] == 'pointer':
+            if len(mods) and mods[-1] == 'pointer':
                 mods.pop()
                 t.modifiers = tuple(mods)
-                t.name = f"{retval_type}({ptr_prefix}*)({params})"
+                t.name = "%s(%s*)(%s)" % (retval_type, ptr_prefix, params)
             else:
-                t.name = f"{retval_type}({params})"
+                t.name = "%s(%s)" % (retval_type, params)
             return t
     elif DIE_is_ptr_to_member_struct(type_die):
         dt =  parse_cpp_datatype(next(type_die.iter_children())) # The first element is pfn, a function pointer with a this
@@ -95,7 +83,7 @@ def parse_cpp_datatype(var_die: DIE) -> TypeDesc:
         dt.tag = "ptr_to_member_type" # Not a function pointer per se
         return dt
     elif t.tag == 'array':
-        t.dimensions = tuple(_array_subtype_size(sub)
+        t.dimensions = (_array_subtype_size(sub)
             for sub
             in type_die.iter_children()
             if sub.tag == 'DW_TAG_subrange_type')
@@ -109,8 +97,8 @@ def parse_cpp_datatype(var_die: DIE) -> TypeDesc:
 
     # Check the nesting - important for parameters
     parent = type_die.get_parent()
-    scopes: list[str] = []
-    while parent and parent.tag in ('DW_TAG_class_type', 'DW_TAG_structure_type', 'DW_TAG_union_type', 'DW_TAG_namespace'):
+    scopes = list()
+    while parent.tag in ('DW_TAG_class_type', 'DW_TAG_structure_type', 'DW_TAG_union_type', 'DW_TAG_namespace'):
         scopes.insert(0, safe_DIE_name(parent, _strip_type_tag(parent) + " "))
         # If unnamed scope, fall back to scope type - like "structure "
         parent = parent.get_parent()
@@ -120,7 +108,7 @@ def parse_cpp_datatype(var_die: DIE) -> TypeDesc:
 
 #--------------------------------------------------
 
-class TypeDesc:
+class TypeDesc(object):
     """ Encapsulates a description of a datatype, as parsed from DWARF DIEs.
         Not enough to display the variable in the debugger, but enough
         to produce a type description string similar to those of llvm-dwarfdump.
@@ -141,14 +129,14 @@ class TypeDesc:
             array. -1 means an array of unknown dimension.
 
     """
-    def __init__(self) -> None:
-        self.name: str | None = None
-        self.modifiers: tuple[str, ...] = () # Reads left to right
-        self.scopes: tuple[str, ...] = () # Reads left to right
-        self.tag: str | None = None
-        self.dimensions: tuple[int, ...] | None = None
+    def __init__(self):
+        self.name = None
+        self.modifiers = () # Reads left to right
+        self.scopes = () # Reads left to right
+        self.tag = None
+        self.dimensions = None
 
-    def __str__(self) -> str:
+    def __str__(self):
         # Some reference points from dwarfdump:
         # const->pointer->const->char = const char *const
         # const->reference->const->int = const const int &
@@ -157,9 +145,9 @@ class TypeDesc:
         mods = self.modifiers
 
         parts = []
-        # Initial const/volatile applies to the var ifself, other consts apply to the pointee
-        if mods and mods[0] in ('const', 'volatile'):
-            parts.append(mods[0])
+        # Initial const applies to the var ifself, other consts apply to the pointee
+        if len(mods) and mods[0] == 'const':
+            parts.append("const")
             mods = mods[1:]
 
         # ref->const in the end, const goes in front
@@ -171,37 +159,37 @@ class TypeDesc:
             name = '::'.join(self.scopes)+'::' + name
         parts.append(name)
 
-        if mods:
+        if len(mods):
             parts.append("".join(cpp_symbols[mod] for mod in mods))
 
         if self.dimensions:
-            dims = "".join('[{}]'.format(str(dim) if dim > 0 else '')
+            dims = "".join('[%s]' % (str(dim) if dim > 0 else '',)
                 for dim in self.dimensions)
         else:
             dims = ''
 
         return " ".join(parts)+dims
 
-def DIE_name(die: DIE) -> str:
+def DIE_name(die):
     return bytes2str(die.attributes['DW_AT_name'].value)
 
-def safe_DIE_name(die: DIE, default: str = '') -> str:
+def safe_DIE_name(die, default = ''):
     return bytes2str(die.attributes['DW_AT_name'].value) if 'DW_AT_name' in die.attributes else default
 
-def DIE_type(die: DIE) -> DIE:
+def DIE_type(die):
     return die.get_DIE_from_attribute("DW_AT_type")
 
-class ClassDesc:
-    def __init__(self) -> None:
-        self.scopes: tuple[str, ...] = ()
-        self.const_member: bool = False
+class ClassDesc(object):
+    def __init__(self):
+        self.scopes = ()
+        self.const_member = False
 
-def get_class_spec_if_member(func_spec: DIE, the_func: DIE) -> ClassDesc | None:
+def get_class_spec_if_member(func_spec, the_func):
     if 'DW_AT_object_pointer' in the_func.attributes:
         this_param = the_func.get_DIE_from_attribute('DW_AT_object_pointer')
         this_type = parse_cpp_datatype(this_param)
         class_spec = ClassDesc()
-        class_spec.scopes = (*this_type.scopes, str(this_type.name))
+        class_spec.scopes = this_type.scopes + (this_type.name,)
         class_spec.const_member = any(("const", "pointer") == this_type.modifiers[i:i+2]
             for i in range(len(this_type.modifiers))) # const -> pointer -> const for this arg of const
         return class_spec
@@ -209,8 +197,8 @@ def get_class_spec_if_member(func_spec: DIE, the_func: DIE) -> ClassDesc | None:
     # Check the parent element chain - could be a class
     parent = func_spec.get_parent()
 
-    scopes: list[str] = []
-    while parent and parent.tag in ("DW_TAG_class_type", "DW_TAG_structure_type", "DW_TAG_namespace"):
+    scopes = []
+    while parent.tag in ("DW_TAG_class_type", "DW_TAG_structure_type", "DW_TAG_namespace"):
         scopes.insert(0, DIE_name(parent))
         parent = parent.get_parent()
     if scopes:
@@ -220,29 +208,34 @@ def get_class_spec_if_member(func_spec: DIE, the_func: DIE) -> ClassDesc | None:
 
     return None
 
-def format_function_param(param_spec: DIE, param: DIE) -> str:
+def format_function_param(param_spec, param):
     if param_spec.tag == 'DW_TAG_formal_parameter':
+        if 'DW_AT_name' in param.attributes:
+            name = DIE_name(param)
+        elif 'DW_AT_name' in param_spec.attributes:
+            name = DIE_name(param_spec)
+        else:
+            name = None
         type = parse_cpp_datatype(param_spec)
         return  str(type)
     else: # unspecified_parameters AKA variadic
         return "..."
 
-def DIE_is_ptr_to_member_struct(type_die: DIE) -> bool:
+def DIE_is_ptr_to_member_struct(type_die):
     if type_die.tag == 'DW_TAG_structure_type':
         members = tuple(die for die in type_die.iter_children() if die.tag == "DW_TAG_member")
         return len(members) == 2 and safe_DIE_name(members[0]) == "__pfn" and safe_DIE_name(members[1]) == "__delta"
     return False
 
-def _strip_type_tag(die: DIE) -> str:
+def _strip_type_tag(die):
     """Given a DIE with DW_TAG_foo_type, returns foo"""
-    if not isinstance(die.tag, str): # User-defined tag
-        return ""
     return die.tag[7:-5]
 
-def _array_subtype_size(sub: DIE) -> int:
+def _array_subtype_size(sub):
     if 'DW_AT_upper_bound' in sub.attributes:
         return sub.attributes['DW_AT_upper_bound'].value + 1
     if 'DW_AT_count' in sub.attributes:
         return sub.attributes['DW_AT_count'].value
     else:
         return -1
+

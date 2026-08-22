@@ -6,25 +6,12 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-from __future__ import annotations
-
 from bisect import bisect_right
-from functools import cached_property
-from typing import TYPE_CHECKING, Any
-
-from ..common.utils import dwarf_assert
 from .die import DIE
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    from ..construct.lib.container import Container
-    from .abbrevtable import AbbrevTable
-    from .dwarfinfo import DWARFInfo
-    from .structs import DWARFStructs
+from ..common.utils import dwarf_assert
 
 
-class CompileUnit:
+class CompileUnit(object):
     """ A DWARF compilation unit (CU).
 
             A normal compilation unit typically represents the text and data
@@ -42,14 +29,7 @@ class CompileUnit:
         To get the top-level DIE describing the compilation unit, call the
         get_top_DIE method.
     """
-    def __init__(
-        self,
-        header: Container,
-        dwarfinfo: DWARFInfo,
-        structs: DWARFStructs,
-        cu_offset: int,
-        cu_die_offset: int,
-    ) -> None:
+    def __init__(self, header, dwarfinfo, structs, cu_offset, cu_die_offset):
         """ header:
                 CU header for this compile unit
 
@@ -71,42 +51,44 @@ class CompileUnit:
         self.cu_offset = cu_offset
         self.cu_die_offset = cu_die_offset
 
+        # The abbreviation table for this CU. Filled lazily when DIEs are
+        # requested.
+        self._abbrev_table = None
+
         # A list of DIEs belonging to this CU.
         # This list is lazily constructed as DIEs are iterated over.
-        self._dielist: list[DIE] = []
+        self._dielist = []
         # A list of file offsets, corresponding (by index) to the DIEs
         # in `self._dielist`. This list exists separately from
         # `self._dielist` to make it binary searchable, enabling the
         # DIE population strategy used in `iter_DIE_children`.
         # Like `self._dielist`, this list is lazily constructed
         # as DIEs are iterated over.
-        self._diemap: list[int] = []
+        self._diemap = []
 
-    def dwarf_format(self) -> int:
+    def dwarf_format(self):
         """ Get the DWARF format (32 or 64) for this CU
         """
         return self.structs.dwarf_format
 
-    def get_abbrev_table(self) -> AbbrevTable:
+    def get_abbrev_table(self):
         """ Get the abbreviation table (AbbrevTable object) for this CU
         """
+        if self._abbrev_table is None:
+            self._abbrev_table = self.dwarfinfo.get_abbrev_table(
+                self['debug_abbrev_offset'])
         return self._abbrev_table
 
-    @cached_property
-    def _abbrev_table(self) -> AbbrevTable:
-        return self.dwarfinfo.get_abbrev_table(self['debug_abbrev_offset'])
-
-    def get_top_DIE(self) -> DIE:
+    def get_top_DIE(self):
         """ Get the top DIE (which is either a DW_TAG_compile_unit or
             DW_TAG_partial_unit) of this CU
         """
 
         # Note that a top DIE always has minimal offset and is therefore
         # at the beginning of our lists, so no bisect is required.
-        if self._diemap:
+        if len(self._diemap) > 0:
             return self._dielist[0]
 
-        assert self.dwarfinfo.debug_info_sec is not None
         top = DIE(
                 cu=self,
                 stream=self.dwarfinfo.debug_info_sec.stream,
@@ -119,17 +101,17 @@ class CompileUnit:
 
         return top
 
-    def has_top_DIE(self) -> bool:
+    def has_top_DIE(self):
         """ Returns whether the top DIE in this CU has already been parsed and cached.
             No parsing on demand!
         """
-        return bool(self._diemap)
+        return len(self._diemap) > 0        
 
     @property
-    def size(self) -> int:
+    def size(self):
         return self['unit_length'] + self.structs.initial_length_field_size()
 
-    def get_DIE_from_refaddr(self, refaddr: int) -> DIE:
+    def get_DIE_from_refaddr(self, refaddr):
         """ Obtain a DIE contained in this CU from a reference.
 
             refaddr:
@@ -143,53 +125,17 @@ class CompileUnit:
         # All DIEs are after the cu header and within the unit
         dwarf_assert(
             self.cu_die_offset <= refaddr < self.cu_offset + self.size,
-            f'refaddr {refaddr} not in DIE range of CU {self.cu_offset}')
+            'refaddr %s not in DIE range of CU %s' % (refaddr, self.cu_offset))
 
         return self._get_cached_DIE(refaddr)
 
-    def iter_DIEs(self) -> Iterator[DIE]:
+    def iter_DIEs(self):
         """ Iterate over all the DIEs in the CU, in order of their appearance.
             Note that null DIEs will also be returned.
         """
-        assert self.dwarfinfo.debug_info_sec is not None
-        stm = self.dwarfinfo.debug_info_sec.stream
-        pos = self.cu_die_offset
-        end_pos = self.cu_offset + self.size
+        return self._iter_DIE_subtree(self.get_top_DIE())
 
-        die = self.get_top_DIE()
-        yield die
-        pos += die.size
-        parent: DIE | None = die
-        i = 1
-        while pos < end_pos:
-            if i < len(self._diemap) and self._diemap[i] == pos: # DIE already cached
-                die = self._dielist[i]
-            else:
-                die = DIE(self, stm, pos)
-                self._dielist.insert(i, die)
-                self._diemap.insert(i, pos)
-            i += 1
-
-            die._parent = parent
-
-            if die.tag is None and parent is not None:
-                parent._terminator = die
-                parent = parent._parent
-
-            if die.has_children:
-                parent = die
-
-            if die.tag == 'DW_TAG_imported_unit' and self.dwarfinfo.supplementary_dwarfinfo:
-                # Falls back to subtree traversal in the supplemental DWARF. Any way to streamline that too?
-                supp_die = die.get_DIE_from_attribute('DW_AT_import')
-                yield from supp_die.cu._iter_DIE_subtree(supp_die)
-            else:
-                yield die
-
-            pos += die.size
-
-
-    def iter_DIE_children(self, die: DIE) -> Iterator[DIE]:
+    def iter_DIE_children(self, die):
         """ Given a DIE, yields either its children, without null DIE list
             terminator, or nothing, if that DIE has no children.
 
@@ -224,7 +170,7 @@ class CompileUnit:
                 elif sibling.form == 'DW_FORM_ref_addr':
                     cur_offset = sibling.value
                 else:
-                    raise NotImplementedError(f'sibling in form {sibling.form}')
+                    raise NotImplementedError('sibling in form %s' % sibling.form)
             else:
                 # If no DW_AT_sibling attribute is provided by the producer
                 # then the whole child subtree must be parsed to find its next
@@ -238,18 +184,17 @@ class CompileUnit:
                 if child._terminator is None:
                     for _ in self.iter_DIE_children(child):
                         pass
-                    assert child._terminator is not None
 
                 cur_offset = child._terminator.offset + child._terminator.size
 
     #------ PRIVATE ------#
 
-    def __getitem__(self, name: str) -> Any:
+    def __getitem__(self, name):
         """ Implement dict-like access to header entries
         """
         return self.header[name]
 
-    def _iter_DIE_subtree(self, die: DIE) -> Iterator[DIE]:
+    def _iter_DIE_subtree(self, die):
         """ Given a DIE, this yields it with its subtree including null DIEs
             (child list terminators).
         """
@@ -260,11 +205,11 @@ class CompileUnit:
         yield die
         if die.has_children:
             for c in die.iter_children():
-                yield from die.cu._iter_DIE_subtree(c)
-            assert die._terminator is not None
+                for d in die.cu._iter_DIE_subtree(c):
+                    yield d
             yield die._terminator
 
-    def _get_cached_DIE(self, offset: int) -> DIE:
+    def _get_cached_DIE(self, offset):
         """ Given a DIE offset, look it up in the cache.  If not present,
             parse the DIE and insert it into the cache.
 

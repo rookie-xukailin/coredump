@@ -6,11 +6,8 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-# Keep dict(...) constructs: their aligned, keyword-style enum definitions are
-# more readable than dict literals or comprehensions in this mapping-heavy file.
-# ruff: noqa: C402, C408
-
 from ..construct import Pass
+
 
 ENUM_DW_TAG = dict(
     DW_TAG_null                        = 0x00,
@@ -86,15 +83,14 @@ ENUM_DW_TAG = dict(
     DW_TAG_template_alias              = 0x43,
     DW_TAG_coarray_type                = 0x44,
     DW_TAG_generic_subrange            = 0x45,
-    DW_TAG_dynamic_type                = 0x46,
+    DW_TAG_dynamic_type                = 0x46,    
     DW_TAG_atomic_type                 = 0x47,
     DW_TAG_call_site                   = 0x48,
     DW_TAG_call_site_parameter         = 0x49,
     DW_TAG_skeleton_unit               = 0x4a,
     DW_TAG_immutable_type              = 0x4b,
 
-    # Tags between 0x4080 and 0xffff are user-defined.
-    # different implementations may overlap?
+
 
     DW_TAG_lo_user                     = 0x4080,
     DW_TAG_GNU_template_template_param = 0x4106,
@@ -147,7 +143,6 @@ ENUM_DW_AT = dict(
     DW_AT_const_value               = 0x1c,
     DW_AT_containing_type           = 0x1d,
     DW_AT_default_value             = 0x1e,
-    DW_AT_friends                   = 0x1f,
     DW_AT_inline                    = 0x20,
     DW_AT_is_optional               = 0x21,
     DW_AT_lower_bound               = 0x22,
@@ -157,9 +152,7 @@ ENUM_DW_AT = dict(
     DW_AT_protected                 = 0x26,
     DW_AT_prototyped                = 0x27,
     DW_AT_public                    = 0x28,
-    DW_AT_pure_virtual              = 0x29,
     DW_AT_return_addr               = 0x2a,
-    # In DWARFv1, DW_AT_specification was at 0x2b, moved to 0x47 in v2
     DW_AT_start_scope               = 0x2c,
     DW_AT_bit_stride                = 0x2e,
     DW_AT_stride_size               = 0x2e,
@@ -275,8 +268,6 @@ ENUM_DW_AT = dict(
     DW_AT_MIPS_allocatable_dopetype     = 0x200f,
     DW_AT_MIPS_assumed_shape_dopetype   = 0x2010,
     DW_AT_MIPS_assumed_size             = 0x2011,
-
-    DW_AT_HP_opt_level                  = 0x2014,
 
     DW_AT_sf_names                      = 0x2101,
     DW_AT_src_info                      = 0x2102,
@@ -422,8 +413,6 @@ ENUM_DW_LNCT = dict(
     DW_LNCT_size             = 0x4,
     DW_LNCT_MD5              = 0x5,
     DW_LNCT_lo_user          = 0x2000,
-    DW_LNCT_LLVM_source      = 0x2001,
-    DW_LNCT_LLVM_is_MD5      = 0x2002,
     DW_LNCT_hi_user          = 0x3fff
 )
 
@@ -461,9 +450,7 @@ ENUM_DW_RLE = dict(
     DW_RLE_start_length  = 0x07
 )
 
-# See https://dwarfstd.org/languages.html
 ENUM_DW_LANG = dict(
-    # DWARF v5 and earlier
     DW_LANG_C89            = 0x0001,
     DW_LANG_C              = 0x0002,
     DW_LANG_Ada83          = 0x0003,
@@ -501,59 +488,8 @@ ENUM_DW_LANG = dict(
     DW_LANG_Fortran08      = 0x0023,
     DW_LANG_RenderScript   = 0x0024,
     DW_LANG_BLISS          = 0x0025,
-    # After DWARF v5
-    DW_LANG_Kotlin         = 0x0026,
-    DW_LANG_Zig            = 0x0027,
-    DW_LANG_Crystal        = 0x0028,
-    DW_LANG_C_plus_plus_17 = 0x002a,
-    DW_LANG_C_plus_plus_20 = 0x002b,
-    DW_LANG_C17            = 0x002c,
-    DW_LANG_Fortran18      = 0x002d,
-    DW_LANG_Ada2005        = 0x002e,
-    DW_LANG_Ada2012        = 0x002f,
-    DW_LANG_HIP            = 0x0030,
-    DW_LANG_Assembly       = 0x0031,
-    DW_LANG_C_sharp        = 0x0032,
-    DW_LANG_Mojo           = 0x0033,
-    DW_LANG_GLSL           = 0x0034,
-    DW_LANG_GLSL_ES        = 0x0035,
-    DW_LANG_HLSL           = 0x0036,
-    DW_LANG_OpenCL_CPP     = 0x0037,
-    DW_LANG_CPP_for_OpenCL = 0x0038,
-    DW_LANG_SYCL           = 0x0039,
-    DW_LANG_C_plus_plus_23 = 0x003a,
-    DW_LANG_Odin           = 0x003b,
-    DW_LANG_P4             = 0x003c,
-    DW_LANG_Metal          = 0x003d,
-    DW_LANG_C23            = 0x003e,
-    DW_LANG_Fortran23      = 0x003f,
-    DW_LANG_Ruby           = 0x0040,
-    DW_LANG_Move           = 0x0041,
-    DW_LANG_Hylo           = 0x0042,
-    DW_LANG_V              = 0x0043,
-    DW_LANG_Algol68        = 0x0044,
-    DW_LANG_Nim            = 0x0045,
-    DW_LANG_Erlang         = 0x0046,
-    DW_LANG_Elixir         = 0x0047,
-    DW_LANG_Gleam          = 0x0048,
-    # Vendor extensions range
     DW_LANG_lo_user        = 0x8000,
-    DW_LANG_hi_user        = 0xffff,
-    # Note: in absense of official names, the naming of the following
-    # extensions follows what's done in the include/dwarf2.h file in the GCC
-    # repo.
-    # Mips extensions
-    DW_LANG_Mips_Assembler = 0x8001,
-    # UPC (Unified Parallel C) extensions
-    DW_LANG_Upc            = 0x8765, # Replaced by DW_LANG_UPC
-    # HP extensions
-    DW_LANG_HP_Bliss       = 0x8003,
-    DW_LANG_HP_Basic91     = 0x8004,
-    DW_LANG_HP_Pascal91    = 0x8005,
-    DW_LANG_HP_IMacro      = 0x8006,
-    DW_LANG_HP_Assembler   = 0x8007,
-    # Rust extensions
-    DW_LANG_Rust_old       = 0x9000 # Replaced by DW_LANG_Rust
+    DW_LANG_hi_user        = 0xffff
 )
 
 ENUM_DW_ATE = dict(
