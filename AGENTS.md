@@ -20,6 +20,12 @@ python tests/run_all.py          # 系统套件将进程内驱动完整分析流
   `tests/system_manifest.py` 的 EXPECT_ARCH 注释）。任何新增 FAIL 都许不许提交。
 - 修改只影响纯文档/注释时，① 必须跑；② 建议跑。
 
+## 1.5 Python 版本基线
+
+- **Python 3.8+**（真实编译服务器环境）：新增代码不得引入 3.9+ 语法/API
+  （`tests/test_py38_compat.py` 静态门禁拦截；vendored pyelftools 固定 0.31.x，
+  升级前必须在真实 3.8 解释器上重跑全量测试）。
+
 ## 2. 提交规约
 
 - 提交到**当前分支**（`develop/rookie/coredump`），不擅自开分支。

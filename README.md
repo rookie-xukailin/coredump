@@ -27,7 +27,7 @@ python3 bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
 
 ## 依赖
 
-- Python 3.7+，无第三方 pip 依赖（pyelftools 以 vendoring 方式放在 `open/pyelftools`）
+- **Python 3.8+**（基线 3.8，已在 3.8.18/3.12 实测；vendored pyelftools 固定 0.31.x，tests/test_py38_compat.py 静态防回退）
 - 交叉 gdb / addr2line（可选；缺失时对应技能自动降级，栈扫描等纯 Python 能力不受影响）
 
 ## 测试
