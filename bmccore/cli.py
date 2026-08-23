@@ -142,6 +142,8 @@ def main(argv=None):
     p_an.add_argument("--symbol-table", metavar="PATH",
                       help="符号表文件或目录的绝对路径（编译阶段单独产出的 ELF/"
                            "符号表文件，含 build-id+symtab+DWARF）")
+    p_an.add_argument("--artifact-dir", metavar="PATH", dest="artifact_dir",
+                      help="[兼容旧参数] 未strip编译产物根目录，等价 --symbol-table")
     p_an.add_argument("--source-root", help="源码树根目录")
     p_an.add_argument("--sysroot", help="固件staging根文件系统")
     p_an.add_argument("--toolchain-prefix", help="交叉工具链前缀（如 aarch64-linux-gnu-）")

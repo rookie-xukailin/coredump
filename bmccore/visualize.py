@@ -37,12 +37,15 @@ def _get_local_ip():
 
 
 _SIG_NAMES = {2: "SIGINT", 4: "SIGILL", 5: "SIGTRAP", 6: "SIGABRT",
-              7: "SIGBUS", 8: "SIGFPE", 11: "SIGSEGV"}
+              7: "SIGBUS", 8: "SIGFPE", 11: "SIGSEGV", 13: "SIGPIPE"}
 _SIG_HINTS = {
     "SIGSEGV": "访问了不该访问的内存地址",
     "SIGABRT": "进程主动 abort（glibc 堆检查发现内存损坏，或 assert 失败）",
     "SIGBUS": "mmap 映射的文件被外部截断/替换后继续访问",
     "SIGILL": "CPU 执行了非法指令（函数指针大概率被踩坏）",
+    "SIGPIPE": "向对端已关闭的管道/FIFO 写入（socket/IPC 对端退出）",
+    "SIGFPE": "整数运算错误（除零/溢出），检查换算公式的分母",
+    "SIGTRAP": "断点/陷入指令触发（调试器或异常系统调用）",
 }
 
 

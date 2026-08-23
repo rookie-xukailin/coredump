@@ -118,6 +118,10 @@ class Config(object):
             v = getattr(args, cli_k, None)
             if v is not None:
                 setattr(self, attr, v)
+        # 兼容旧参数 --artifact-dir（符号表重构后被 --symbol-table 取代）
+        art = getattr(args, "artifact_dir", None)
+        if art is not None and self.symbol_table is None:
+            self.symbol_table = art
         if getattr(args, "skills", None):
             self.skills = [s.strip() for s in args.skills.split(",") if s.strip()]
         if getattr(args, "module", None):
