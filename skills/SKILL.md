@@ -127,19 +127,185 @@ cat /tmp/bmccore_out/*_report.json
 | **竞态** (多线程 + 数据被踩) | 分析两个线程的同步原语，找缺失的锁/原子操作/内存屏障 |
 | **SIGABRT + console 有 glibc 消息** | 直接从消息定位（"double free"/"invalid next size"/"assert"），再追溯触发条件 |
 
-#### 4c. 堆指纹源码定位
+#### 4c. 工程代码取证搜索（核心能力——规范与技巧）
 
-报告"内容指纹"给出的字符串（如 `'fan0 | XXXX'`、`'SSSS...'`、`'GGGG...'`）：
+以下是你在源码树中系统化搜索线索的方法论。按崩溃类型分类，每种给出
+具体的搜索模式和判断标准。
+
+##### 4c-1. 堆指纹搜索（内存被踩场景）
+
+工具报告"内容指纹"给出的字符串/字节模式，在源码中找出写入者：
 
 ```bash
-# 在源码树中 grep 这些指纹
-grep -rn "fan0" <源码树>/
-grep -rn "0x58" <源码树>/
-# 或者找 memset/strcpy 填充这些值的代码
-grep -rn "memset.*0x58\|memset.*0x53\|memset.*0x47" <源码树>/
+# 策略 1：搜指纹字符串（最直接）
+# 报告说指纹是 'fan0'、'SSSS...'、'GGGG...' 等
+grep -rn "fan0" --include="*.c" --include="*.h" <源码树>/
+grep -rn "0x53" --include="*.c" <源码树>/   # 0x53='S' 的十六进制
+
+# 策略 2：搜填充值的写入操作
+grep -rn "memset.*0x53\|memset.*0x47\|memset.*0x58" --include="*.c" <源码树>/
+grep -rn "'S'\|'G'\|'X'" --include="*.c" <源码树>/ | grep -i "memset\|fill\|pad"
+
+# 策略 3：搜相同长度的数组/缓冲区声明
+# 报告说受害对象 48 字节 → 搜 sizeof 为 48 或 0x30 的结构
+grep -rn "sizeof.*48\|sizeof.*0x30" --include="*.c" <源码树>/
+grep -rn "\[48\]\|\[0x30\]" --include="*.c" --include="*.h" <源码树>/
+
+# 策略 4：搜 victim 结构体的字段名（从块头身份指纹提取）
+# 报告说块头含 'fan0' → 搜索含 name 字段的结构体
+grep -rn "char.*name\[.*\]" --include="*.h" <源码树>/ | grep -B5 -A5 "fan\|pwm\|ctrl"
 ```
 
-指纹直接指向写入这些字节的模块——这就是肇事者。
+**判断标准**：命中 ≥2 个指纹特征（字符串 + 大小 + 字段名）→ 高置信肇事者。
+
+##### 4c-2. 反向数据流追踪（空指针/野指针场景）
+
+从崩溃变量出发，追溯它的来源：
+
+```bash
+# 第 1 步：找变量定义
+grep -rn "g_fan\|struct fan_ctrl" --include="*.h" --include="*.c" <源码树>/
+# 结果: static struct fan_ctrl *g_fan;  ← 全局指针
+
+# 第 2 步：找所有赋值点（谁给它赋值的？）
+grep -rn "g_fan\s*=" --include="*.c" <源码树>/
+# 结果: g_fan = malloc(...) @ init.c:42
+#        g_fan = NULL @ cleanup.c:20   ← 这里置空了！
+
+# 第 3 步：找所有使用点（谁在读它？）
+grep -rn "g_fan" --include="*.c" <源码_tree>/
+# 结果: fan_pwm_apply(g_fan, 128) @ main.c:79  ← 崩溃行
+#        g_fan->set_pwm(...) @ ctrl.c:33
+
+# 第 4 步：找初始化函数（是否被正确调用？）
+grep -rn "fan_init\|fan_register\|fan_create" --include="*.c" <源码树>/
+# 结果: int fan_init(void) @ fan.c:120  ← 函数存在
+grep -rn "fan_init()" --include="*.c" <源码树>/
+# 结果: main() 里没有调用！  ← 根因：初始化遗漏
+```
+
+**关键模式**：
+- `变量名 =` → 找赋值
+- `变量名->` 或 `变量名.` → 找使用
+- `变量名 = NULL\|free(变量名)` → 找释放/置空
+- `init.*变量名\|register.*变量名` → 找初始化
+
+##### 4c-3. 写入者搜索（堆溢出/内存踩踏场景）
+
+找出所有可能写入受害内存区域的代码：
+
+```bash
+# 第 1 步：确定受害结构体类型（从堆取证身份指纹推断）
+# 报告说受害对象 48 字节，含 name/pwm/set_pwm 字段
+grep -rn "struct.*fan_ctrl\|typedef.*fan_ctrl" --include="*.h" <源码树>/
+
+# 第 2 步：找受害对象的分配位置
+grep -rn "malloc.*fan_ctrl\|sizeof.*fan_ctrl\|new.*fan_ctrl" --include="*.c" <源码树>/
+
+# 第 3 步：找受害对象前后的相邻分配（工具说"相邻块是嫌疑"）
+# 在分配点附近，看前后各 malloc 了什么
+# 如果代码是: a = malloc(sizeof(struct X)); b = malloc(sizeof(struct Y));
+# 则 a 溢出会踩 b，b 下溢会踩 a
+
+# 第 4 步：找所有可能越界的写入操作
+# 方法 A：搜无边界检查的拷贝
+grep -rn "strcpy\|strcat\|sprintf\|memcpy" --include="*.c" <源码_tree>/ | \
+    grep -v "strncpy\|strncat\|snprintf\|memmove"
+
+# 方法 B：搜循环写入（数组越界模式）
+grep -rn "for.*\[\|while.*\[" --include="*.c" <源码树>/ | grep -v "bounds\|limit\|max"
+
+# 方法 C：搜指针运算（负偏移/过大偏移模式）
+grep -rn "\-\s*0x[0-9a-f]\+\|+\s*0x[0-9a-f]\{3,\}" --include="*.c" <源码树>/
+
+# 第 5 步：搜受害字段名的写入
+grep -rn "set_pwm\s*=\|->set_pwm" --include="*.c" <源码树>/
+# 这找到所有写 set_pwm 字段的代码——肇事者必在其中
+```
+
+**判断标准**：能画出"受害 chunk 的地址空间 ← 谁在什么条件下写入"的完整图。
+
+##### 4c-4. 生命周期追踪（UAF/双释放场景）
+
+```bash
+# 第 1 步：找分配和释放的对
+grep -rn "malloc\|calloc\|realloc" --include="*.c" <源码树>/ | grep "session"
+grep -rn "free.*session\|kfree.*session" --include="*.c" <源码树>/
+
+# 第 2 步：检查是否有多条释放路径
+# 如果 free(p) 出现在 >1 个函数里，检查是否有条件保护
+grep -rn "free.*session" --include="*.c" <源码树>/
+# 结果: free(sess) @ timeout_thread.c:15   ← 超时释放
+#        free(sess) @ io_complete.c:22     ← IO 完成也释放！  ← 竞态双释放
+
+# 第 3 步：找 stale 引用（释放后还在用的指针）
+grep -rn "session->" --include="*.c" <源码树>/
+# 检查每个使用点：这个指针在此时是否可能已被释放？
+
+# 第 4 步：找引用计数/锁的保护
+grep -rn "atomic\|refcount\|mutex\|spin_lock\|rwlock" --include="*.c" --include="*.h" <源码树>/ | \
+    grep "session"
+# 结果: 无任何锁保护！  ← 根因：并发释放无保护
+```
+
+##### 4c-5. 多线程竞态分析（竞态场景）
+
+```bash
+# 第 1 步：找所有线程的入口函数
+grep -rn "pthread_create\|thread_run\|kthread" --include="*.c" <源码树>/
+
+# 第 2 步：找线程间共享的数据
+# 方法：找在多个线程函数中都引用的全局变量
+for var in $(grep -rn "^static\|^volatile" --include="*.c" <源码树>/ | \
+    awk -F: '{print $3}' | grep -o "[a-z_]*g_[a-z_]*\|[a-z_]*_shared[a-z_]*" | sort -u); do
+    count=$(grep -rn "$var" --include="*.c" <源码树>/ | wc -l)
+    [ "$count" -gt 3 ] && echo "共享变量: $var ($count 处引用)"
+done
+
+# 第 3 步：检查共享数据的锁保护
+grep -rn "g_reload\|g_table\|g_nodes" --include="*.c" <源码树>/ | \
+    while read line; do
+        file=$(echo "$line" | cut -d: -f1)
+        # 检查这个使用点前后有没有锁
+        grep -B5 -A5 "$(echo "$line" | cut -d: -f2)" "$file" | grep -c "mutex\|lock\|atomic"
+    done
+# 结果: 0 → 无锁保护！  ← 竞态根因
+
+# 第 4 步：找锁的获取/释放顺序（死锁/竞态）
+grep -rn "pthread_mutex_lock\|pthread_mutex_unlock" --include="*.c" <源码树>/
+# 检查是否所有路径都成对（lock/unlock），是否有嵌套锁顺序不一致
+```
+
+##### 4c-6. 数据结构定义与偏移验证
+
+```bash
+# 找结构体定义（理解崩溃地址对应的字段）
+grep -rn "struct fan_ctrl" --include="*.h" <源码树>/ -A 20
+# 确认: set_pwm 在偏移 24 处（与报告"块内+0x18"对齐？）
+
+# 找字段偏移（如果报告说崩溃地址 = 对象基址 + 0x18）
+grep -rn "offsetof.*fan_ctrl\|offsetof.*set_pwm" --include="*.c" <源码树>/
+# 或者手动算: name[16]=0~15, pwm=16~19, pad=20~23, set_pwm=24~31 → 偏移 24=0x18 ✓
+
+# 验证相邻 chunk 的数据结构（工具说"相邻块是嫌疑"）
+# 如果受害块在 chunk+0x290，相邻块在 chunk+0x180（前块）或 chunk+0x2c0（后块）
+# 找到这些偏移对应的结构体 → 就是嫌疑对象
+```
+
+##### 4c-7. 搜索技巧总结
+
+| 你要找什么 | 搜什么 | 工具 |
+|---|---|---|
+| 指纹字符串 | `grep -rn "指纹内容"` | 直接命中 |
+| 变量的所有赋值 | `grep -rn "varname\s*="` | 追溯来源 |
+| 变量的所有使用 | `grep -rn "varname->\|varname\."` | 找读写点 |
+| 谁释放了它 | `grep -rn "free.*varname\|varname\s*=\s*NULL"` | 找释放路径 |
+| 谁初始化了它 | `grep -rn "init.*varname\|varname\s*=\s*malloc\|varname\s*=\s*new"` | 找初始化 |
+| 无边界检查的拷贝 | `grep -rn "strcpy\|memcpy\|sprintf" \| grep -v "n\|bounds"` | 找溢出点 |
+| 函数指针赋值 | `grep -rn "->func\|\.func\s*=" \| grep -v NULL` | 找回调注册 |
+| 锁保护缺失 | `grep -rn "shared_var" \| grep -cv "lock\|mutex\|atomic"` | 竞态检测 |
+| 结构体定义 | `grep -rn "struct.*name" --include="*.h" -A 20` | 理解偏移 |
+| 所有调用者 | `grep -rn "function_name(" \| grep -v "static\|inline\|define"` | 调用链 |
 
 #### 4d. 交叉验证
 
