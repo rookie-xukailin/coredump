@@ -74,6 +74,7 @@ class Config(object):
         self.fmt = "both"
         self.keep_temp = False
         self.debug = False
+        self.offline = False        # 离线模式：不探测/调用任何外部工具
         self.max_scan_depth = 65536  # 栈扫描最大深度（字节）
         self.max_frames = 50
 
@@ -106,7 +107,7 @@ class Config(object):
             "sysroot": "sysroot", "console_log": "console_log", "exe": "exe",
             "glibc_version": "glibc_version", "output": "output",
             "fmt": "format", "crash_thread_only": "crash_thread_only",
-            "keep_temp": "keep_temp", "debug": "debug",
+            "keep_temp": "keep_temp", "debug": "debug", "offline": "offline",
             "max_scan_depth": "max_scan_depth",
         }
         for cli_k, attr in mapping.items():

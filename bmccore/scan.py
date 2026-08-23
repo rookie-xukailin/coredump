@@ -135,6 +135,18 @@ def scan_thread(core, arch, thread, matches, resolver=None, max_depth=65536,
 
     pending_a2l = []   # (artifact_path, module_base, addr)
 
+    def _resolve_frame(m, cand, raw_v, stack_off, note):
+        """入帧并叠加函数名/行号（模块与产物已定位）。"""
+        frame = ScanFrame(stack_off, raw_v, "确认", note, module=m.module.name)
+        if resolver and m.artifact:
+            func = resolver.lookup(m.artifact.path, cand, m.module.base)
+            if func:
+                frame.func = func
+        if m.artifact:
+            pending_a2l.append((m.artifact.path, m.module.base, cand))
+        res.frames.append(frame)
+        return frame
+
     def _try_frame(cand, raw_v, stack_off, note):
         """按栈上候选同规则验证一个返回地址候选，通过则入帧。
         raw_v 保留原始值（ARM32 Thumb bit0=1 供指令集判定），cand 为剥位后的候选。"""
@@ -166,6 +178,15 @@ def scan_thread(core, arch, thread, matches, resolver=None, max_depth=65536,
             pending_a2l.append((m.artifact.path, m.module.base, cand))
         res.frames.append(frame)
         return frame
+
+    # PC 现场帧：崩溃 PC 本身就是最内层帧（在线时由 gdb 给出，离线时
+    # 没有 gdb 也必须能回答"崩在哪个函数哪一行"）。只要求落在带产物
+    # 的模块代码区，无需 call 验证（它是故障指令本身，不是返回地址）。
+    pc = thread.pc
+    if pc and _code_addr_exec(core, pc):
+        m = _find_module(exec_mods, pc)
+        if m is not None and m.artifact is not None:
+            _resolve_frame(m, pc, pc, -2, "PC(现场)·故障指令本身")
 
     # LR/ra 寄存器候选：bt 断链（pc 为野地址）时，返回地址往往仍躺在
     # 链接寄存器里——栈上扫不到，但它是恢复"谁调用了崩溃点"的最后线索

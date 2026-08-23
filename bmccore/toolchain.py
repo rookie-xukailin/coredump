@@ -39,9 +39,17 @@ def _which(name):
 
 
 def discover(arch_name, config=None):
-    """发现指定架构的工具链。返回 Toolchain；一个都没有时 tools 全为 None。"""
+    """发现指定架构的工具链。返回 Toolchain；一个都没有时 tools 全为 None。
+
+    config.offline=True 时进入离线模式：无条件不启用任何外部工具
+    （含配置里显式给出的路径）——纯 Python 能力（符号配对/栈扫描/
+    DWARF 行号/堆取证）不受影响，gdb 精确回溯技能跳过。
+    """
     tools = {t: None for t in _TOOLS}
     notes = []
+    offline = bool(config and getattr(config, "offline", False))
+    if offline:
+        return Toolchain(arch_name, tools, "离线模式（纯Python，不调用外部工具）")
 
     tc_cfg = {}
     if config and config.toolchain:
@@ -51,11 +59,11 @@ def discover(arch_name, config=None):
         p = os.path.expanduser(str(p))
         if os.path.isfile(p):
             tools[t] = p
-        else:
+        elif not offline:
             w = _which(p)          # 允许直接写命令名（如 gdb = "gdb-multiarch"）
             if w:
                 tools[t] = w
-    if tc_cfg.get("prefix"):
+    if tc_cfg.get("prefix") and not offline:
         pfx = tc_cfg["prefix"]
         if pfx.endswith("-"):        # 配置里常见带尾横线的 triple 前缀
             pfx = pfx[:-1]
@@ -67,7 +75,7 @@ def discover(arch_name, config=None):
                     tools[t] = w
 
     # 通用 gdb-multiarch / gdb 兜底（可打开任意架构 core）
-    if not any(tools.values()):
+    if not any(tools.values()) and not offline:
         for t in _TOOLS:
             if t == "gdb":
                 for cand in ("gdb-multiarch", "gdb"):
@@ -77,7 +85,7 @@ def discover(arch_name, config=None):
                         notes.append("使用通用 %s" % cand)
                         break
 
-    if not any(tools.values()):
+    if not any(tools.values()) and not offline:
         for prefix in _ARCH_PREFIXES.get(arch_name, []):
             found_any = False
             for t in _TOOLS:

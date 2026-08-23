@@ -153,6 +153,9 @@ def main(argv=None):
     p_an.add_argument("-o", "--output", help="报告输出目录")
     p_an.add_argument("--format", dest="fmt", choices=["md", "json", "both"], default=None)
     p_an.add_argument("--keep-temp", action="store_true", help="保留解包/gdb中间文件")
+    p_an.add_argument("--offline", action="store_true",
+                      help="离线模式：不探测/调用 gdb/addr2line 等外部工具"
+                           "（纯Python：符号配对/栈扫描/行号(DWARF)/堆取证全可用）")
     p_an.add_argument("--debug", action="store_true")
     p_an.add_argument("--max-scan-depth", type=int, default=None,
                       help="栈扫描最大深度（字节），默认65536")

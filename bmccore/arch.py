@@ -81,13 +81,16 @@ def _arm32_is_call(prev8, addr, value):
             if (hw & 0xFF87) == 0x4780:
                 return True, "Thumb BLX Rm(16位)"
         return False, "Thumb但前指令不是call"
-    # ARM 模式：候选-4 处条件 BL（含无条件 BL cond=1110/1111）或 BLX imm
+    # ARM 模式：候选-4 处条件 BL（含无条件 BL cond=1110/1111）、BLX imm、
+    # 或 BLX Rm（寄存器间接调用，-O1 经函数指针调用的常见形态）
     if len(prev8) >= 8:
         w = _u32(prev8, 4)
         if (w & 0x0F000000) == 0x0B000000:      # cond BL
             return True, "ARM BL"
         if (w & 0xFE000000) == 0xFA000000:      # BLX imm (H 位在 bit24, 不细究)
             return True, "ARM BLX imm"
+        if (w & 0x0FFFFFF0) == 0x012FFF30:      # BLX Rm（含 cond 形式）
+            return True, "ARM BLX Rm"
     return False, "ARM但前指令不是call"
 
 

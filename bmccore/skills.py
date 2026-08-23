@@ -114,6 +114,13 @@ class Pipeline(object):
                 def a2l(path, addrs, base):
                     return toolchain_mod.addr2line_batch(
                         path, [a - base for a in addrs], tchain.tools["addr2line"])
+            else:
+                # 离线（无 addr2line）：纯 Python 直读 DWARF 行号表
+                from . import linetab
+
+                def a2l(path, addrs, base):
+                    table = linetab.resolve(path, [a - base for a in addrs])
+                    return {k: ("", v) for k, v in table.items()}
             for t in threads:
                 scan_results[t.tid] = scan_mod.scan_thread(
                     core, core.arch, t, matches, resolver,
@@ -288,7 +295,9 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
         lines += ["| 栈偏移 | 值 | 置信度 | 函数/位置 | 判定 |", "|---|---|---|---|---|"]
         for f in sr.frames:
             loc = f.loc or (f.func or "")
-            off_txt = "LR/ra寄存器" if f.stack_off < 0 else "SP+0x%x" % f.stack_off
+            off_txt = ("PC(现场)" if f.stack_off == -2 else
+                       "LR/ra寄存器" if f.stack_off == -1 else
+                       "SP+0x%x" % f.stack_off)
             lines.append("| %s | 0x%x | %s | %s | %s |" % (
                 off_txt, f.value, f.confidence, loc, f.why))
         for note in sr.notes:
