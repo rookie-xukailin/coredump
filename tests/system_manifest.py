@@ -31,7 +31,7 @@ CASES = {
     # 也可能穿透到 free 暴雷——两种形态工具均可归因，均判合格
     "heap_overflow": dict(dim="堆溢出写穿 chunk 头(fortify拦截/free暴雷皆可)",
                           kw="堆|加固检查", ev="heap_overflow.c:"),
-    "double_free": dict(dim="重复释放(tcache 检出)", kw="free", ev="audit_cleanup"),
+    "double_free": dict(dim="重复释放(tcache 检出)", kw="free", ev="double_free.c:"),
     "uaf_write": dict(dim="大块 free→munmap 后悬垂写", kw="非法内存访问", ev="fw_hotfix_patch"),
     "oob_read": dict(dim="报文字段大越界读", kw="非法内存访问", ev="sdr_read_at"),
     "bad_funcptr": dict(dim="被写坏的函数指针调用→PC 跳飞", kw="0xdead0000", ev="bad_funcptr.c:"),

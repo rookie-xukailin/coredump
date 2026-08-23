@@ -128,3 +128,65 @@ def test_system_matrix():
           % (n_pass, len(fails), len(list(_iter_cells()))))
     if fails:
         raise AssertionError("系统测试失败 %d 格:\n%s" % (len(fails), "\n".join(fails)))
+
+
+# 离线模式抽样格：(case, arch, 结论关键词, 证据)——覆盖三架构与行号来源
+_OFFLINE_CELLS = [
+    ("null_write", "arm64", "空指针", "hw_fan_set_pwm"),        # 扫描函数名(symtab)
+    ("stomped_late", "arm64", "0x5858585", "stomped_late.c:"),  # LR帧+DWARF行号
+    ("assert_fail", "arm32", "断言", "assert_fail.c:"),          # 扫描帧行号
+    ("oob_read", "riscv64", "非法内存访问", "sdr_read_at"),      # riscv扫描帧
+]
+
+
+def test_system_matrix_offline():
+    """离线模式抽样：无 gdb/addr2line 时纯 Python 能力仍产出结论与证据。"""
+    work = os.environ.get("BMCCORE_SYSTEM_WORK")
+    if not work:
+        print("SKIP  system_matrix_offline（设 BMCCORE_SYSTEM_WORK 启用）")
+        return
+    from bmccore.config import Config
+    from bmccore.intake import intake
+    from bmccore.skills import Pipeline, build_report
+
+    cores_dir = os.path.join(work, "cores")
+    logs_dir = os.path.join(work, "logs", "matrix")
+    cfg = Config()
+    cfg.offline = True                     # 不探测任何外部工具
+    cfg.toolchain = {}
+    cfg.artifact_dir = os.path.join(work, "artifacts")
+    cfg.source_root = os.path.join(work, "cases")
+
+    fails = []
+    for name, arch, kw, ev in _OFFLINE_CELLS:
+        tag = "%s.%s" % (name, arch)
+        core = _find_core(cores_dir, name, arch)
+        if not core:
+            fails.append("%s: core 缺失" % tag)
+            continue
+        cfg.console_log = None
+        clog = os.path.join(logs_dir, "%s.console.log" % tag)
+        if os.path.isfile(clog):
+            cfg.console_log = clog
+        res = intake(core, keep_temp=True)
+        try:
+            pipe = Pipeline(res.core_path, cfg, log=lambda _m: None)
+            results = pipe.run()
+            text = build_report(results, cfg, res.meta, res.source_name).render_markdown()
+        finally:
+            res.cleanup()
+        st = results["status"]
+        if st.get("backtrace", "").startswith("ok"):
+            fails.append("%s: 离线模式不应调用 gdb" % tag)
+        concl = "\n".join(l for l in text.splitlines()
+                          if l.startswith("| 确认 |") or l.startswith("| 疑似 |"))
+        if kw.lower() not in concl.lower():
+            fails.append("%s: 结论缺[%s]" % (tag, kw))
+        if ev not in text:
+            fails.append("%s: 报告缺证据[%s]" % (tag, ev))
+        if fails and fails[-1].startswith(tag):
+            continue
+        print("PASS  offline %-24s (%s)" % (tag, kw))
+    if fails:
+        raise AssertionError("离线抽样失败:\n" + "\n".join(fails))
+    print("离线抽样: PASS %d" % len(_OFFLINE_CELLS))
