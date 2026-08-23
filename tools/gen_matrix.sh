@@ -96,6 +96,12 @@ power_transition|power_transition.c|11|1|log|bare|||
 sel_full_error|sel_full_error.c|11|1|log|gz|||
 shm_unlink_alive|shm_unlink_alive.c|7|2|log|tar|||1
 fifo_sigpipe|fifo_sigpipe.c|13|0|sigpipe|gz|||1
+# ---- 批次 4：消息队列（#74~#78）----
+mq_consumer_uaf|mq_consumer_uaf.c|11|1|log|gz|-pthread||1
+mq_recv_truncate|mq_recv_truncate.c|11|1|log|bare|||
+mq_deser_overflow|mq_deser_overflow.c|11|2|log|gz|||
+msgq_rmid_race|msgq_rmid_race.c|11|1|log|tar|||1
+queue_ring_overrun|queue_ring_overrun.c|11|2|log|bare|||
 "
 
 ARCHS="arm64 arm32 riscv64"

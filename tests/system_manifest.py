@@ -109,6 +109,12 @@ CASES = {
     "sel_full_error": dict(dim="SEL写满错误路径NULL未判空写记录", kw="空指针", ev="sel_commit_record"),
     "shm_unlink_alive": dict(dim="shm_unlink+截断后attach进程远读→SIGBUS", kw="总线错误|非法内存访问", ev="shm_far_read", degrade=True),
     "fifo_sigpipe": dict(dim="FIFO读端退出后写端写入→SIGPIPE", kw="SIGPIPE", ev="log_tail_flush"),
+    # ---- 批次 4：消息队列（#74~#78）----
+    "mq_consumer_uaf": dict(dim="POSIX mq·消费者线程阻塞接收,停止路径先free大块ctx→UAF", kw="非法内存访问", ev="mq_event_process"),
+    "mq_recv_truncate": dict(dim="POSIX mq·接收缓冲过小EMSGSIZE未检查→残留旧消息野偏移", kw="非法内存访问", ev="mq_recv_parse"),
+    "mq_deser_overflow": dict(dim="POSIX mq·消息长度字段未校验→反序列化越界写", kw="非法内存访问", ev="mq_deser_copy"),
+    "msgq_rmid_race": dict(dim="SysV·IPC_RMID后msgrcv返回-1当长度用→巨大块偏移", kw="非法内存访问", ev="mq_rx_dispatch"),
+    "queue_ring_overrun": dict(dim="自研环形队列·满判断缺失→批量入队越过数据页", kw="非法内存访问", ev="mq_ring_push"),
 }
 
 ARCHS = ["arm64", "arm32", "riscv64"]

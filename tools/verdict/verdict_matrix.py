@@ -104,6 +104,12 @@ EXPECT = {
     "sel_full_error":      ("空指针", "sel_commit_record", False),
     "shm_unlink_alive":    ("总线错误|非法内存访问", "shm_far_read", True),
     "fifo_sigpipe":        ("SIGPIPE", "log_tail_flush", False),
+    # ---- 批次 4：消息队列（#74~#78）----
+    "mq_consumer_uaf":     ("非法内存访问", "mq_event_process", False),
+    "mq_recv_truncate":    ("非法内存访问", "mq_recv_parse", False),
+    "mq_deser_overflow":   ("非法内存访问", "mq_deser_copy", False),
+    "msgq_rmid_race":      ("非法内存访问", "mq_rx_dispatch", False),
+    "queue_ring_overrun":  ("非法内存访问", "mq_ring_push", False),
 }
 # 按架构覆盖：qemu-arm 把 UDF 编码上报为 SIGTRAP（真机为 SIGILL）；
 # riscv 的 qemu 翻译层对越过文件 EOF 的访问可能报 SIGBUS 也可能报 SIGSEGV。

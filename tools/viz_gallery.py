@@ -59,6 +59,9 @@ BATCHES = [
                             "dbus_prop_crash", "power_transition",
                             "sel_full_error", "shm_unlink_alive",
                             "fifo_sigpipe"]),
+    ("批次4·消息队列(5)", ["mq_consumer_uaf", "mq_recv_truncate",
+                       "mq_deser_overflow", "msgq_rmid_race",
+                       "queue_ring_overrun"]),
 ]
 ARCHS = ["arm64", "arm32", "riscv64"]
 
