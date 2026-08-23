@@ -1,18 +1,28 @@
 # coredump —— BMC coredump 离线分析工具
 
-解析 ARM32 / ARM64 / RISC-V BMC 用户态进程的 ELF core 文件：输入 core 包
-（如 `1_core-2078599821-remotexdp-6759.tar.gz`），结合编译机上未 strip 的
-编译产物（符号）与交叉工具链，输出带可信度标注的 Markdown/JSON 定位报告。
+解析 ARM32 / ARM64 / RISC-V / x86_64 / i386 BMC 用户态进程的 ELF core 文件：
+输入 core 包（如 `1_core-2078599821-remotexdp-6759.tar.gz`），结合编译机上
+编译阶段单独产出的符号表文件（`--symbol-table`），输出带可信度标注的
+Markdown/JSON 定位报告 + Web 可视化面板。
 
 ## 核心能力
 
 | 能力 | 说明 |
 |---|---|
 | 输入识别 | 自动解包 tar.gz/gz/xz；解析文件名（序号/时间戳/进程名/pid）；探测 core 实际转储内容，缺堆/缺栈时对应技能明确降级 |
-| 符号自动配对 | 从 core 内存映像还原每个 so 的 build-id，与产物目录精确配对；配不上/版本不符时明确报警，绝不静默用错符号 |
+| 符号自动配对 | 从 core 内存映像还原每个 so 的 build-id，与符号表目录精确配对；配不上/版本不符时明确报警，绝不静默用错符号 |
 | GDB 精确回溯 | 自动生成符号加载脚本（file + add-symbol-file）驱动交叉 gdb -batch 回溯 |
-| 栈扫描兜底 | GDB 回溯出 `??`/断链时的降级手段：SP 向下扫代码区候选 + 按架构判定"前一条指令是 call"（ARM/Thumb BL/BLR、A64 BL/BLR、RISC-V JAL/JALR），每帧如实标注 确认/未验证；SP 出界/贴栈底直判栈溢出 |
-| glibc 堆取证 | chunk 链走查定位损坏点；前一个 chunk 是重点嫌疑（越界写穿模式）；全内存引用搜索（谁指着受害区）；内容指纹（字符串/魔数/填充模式 → 指向肇事模块） |
+| CFI 离线回溯 | 无 gdb 时用 .eh_frame CFI 精确展开（纯 Python，替代启发式栈扫描） |
+| 栈扫描兜底 | SP 向下扫代码区候选 + 按架构判定"前一条指令是 call"（ARM/Thumb/A64/RISC-V/x86），每帧如实标注 确认/未验证 |
+| glibc 堆取证 | chunk 链走查定位损坏点；前一个 chunk 是重点嫌疑；受害对象探测（堆头完好时用崩溃寄存器定位）；内容指纹指向肇事模块 |
+| 变量生命周期追踪 | 从崩溃行提取被解引用的指针，在源码中追溯其声明→赋值→释放→崩溃的完整轨迹 |
+| 线程锁关联 | 扫描 pthread_mutex_t 活跃状态，构建等待图，DFS 检测死锁环 |
+| 可视化面板 | Web 仪表盘：递进式崩溃故事 + 源码高亮 + 变量时间线 + 内存布局 + 交互式线程浏览器 + 堆健康报告 |
+| debuginfod | 按 build-id 从远程 HTTP 服务器拉取符号（标准 debuginfod 协议） |
+| Minidump | 支持 Google Breakpad Minidump 格式（线程/模块/异常/内存流） |
+| 信号归因 | SIGSEGV 空指针/越界分类、SIGABRT glibc堆/assert/fortify 归因、SIGBUS mmap截断、出错地址归属 |
+| 源码联动 | 回溯帧的 file:line 自动到源码树抠 ±5 行上下文贴进报告 |
+| 完全离线 | `--offline` 纯 Python 模式，零外部依赖，99 格系统矩阵已验证 |
 | 信号归因 | SIGSEGV 空指针/未映射/越界分类、出错地址归属（模块/堆/栈/未映射）、console 日志提取 glibc abort 原因 |
 | 源码联动 | 回溯帧的 file:line 自动到源码树抠 ±5 行上下文贴进报告 |
 
@@ -185,6 +195,32 @@ python3 bmccore.py analyze 1_core-...tar.gz --offline
 99 格系统测试（33 维度×3 架构）已按 --offline 全量验证（见
 `tests/test_system_matrix.py` 的 `test_system_matrix_offline` 抽样防回退）。
 不加 `--offline` 时，若机器上恰好有 gdb 也会自动用上、没有则同样降级。
+
+## Web 可视化面板
+
+分析完成后加 `--viz` 启动 Web 仪表盘（自动检测可用端口，明确显示 IP:PORT）：
+
+```bash
+python3 bmccore.py analyze core.tar.gz --symbol-table /path --viz
+# 输出:
+#   📊 BMC Coredump 崩溃分析面板
+#   ➜ 本机:  http://localhost:8080
+#   ➜ 局域网: http://192.168.1.100:8080
+```
+
+面板包含 7 个数据驱动组件（有数据就显示，没有自动隐藏）：
+
+| 面板 | 内容 |
+|---|---|
+| 📝 崩溃故事 | 递进式叙事：发生了什么→崩在哪里→怎么走到的→为什么崩 |
+| 📄 崩溃源码 | 红色高亮崩溃行，前后 8 行上下文 |
+| 🔍 变量追踪 | 指针从声明→赋值→释放→崩溃的竖线时间线 |
+| 🗺️ 内存布局 | 堆叠式条形图（代码/堆/栈/只读）+ 明细列表 |
+| 🧵 线程浏览器 | 点击任意线程查看其栈回溯（崩溃线程红色高亮） |
+| 📦 堆健康报告 | 用人话回答"堆有没有问题、谁踩的、怎么踩的" |
+| 🎯 定位结论 | 可信度标注的最终判定 |
+
+`--viz-port 9090` 指定首选端口（被占用自动+1）；`--viz-timeout 30` 定时关闭。
 
 ## 关于符号表
 
