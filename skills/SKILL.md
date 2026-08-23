@@ -446,7 +446,150 @@ grep -rn "rename\|tmpfile\|O_TRUNC" --include="*.c" <源码树>/ | grep "db\|dat
 # 检查: 替换文件时是否有其他进程还在用旧文件？
 ```
 
-##### 4c-9. 搜索技巧总结
+##### 4c-9. glibc 运行时竞态分析（fork/exec/线程创建/malloc/信号）
+
+glibc 自身提供的大量 API 在并发场景下有严格的使用约束。崩溃可能不是
+业务代码的 bug，而是**误用了 glibc 的非线程安全/非 fork 安全接口**。
+
+###### 4c-9a. fork 与多线程的交互（fork-safe 问题）
+
+**核心规则**：`fork()` 只复制调用线程，其他线程在子进程中消失——但它们
+持有的锁/堆状态/条件变量全部残留在子进程里。
+
+```bash
+# 第 1 步：找 fork 调用点
+grep -rn "fork()\|vfork()" --include="*.c" <源码树>/
+
+# 第 2 步：检查 fork 时是否有其他线程持有锁
+# 方法：找 fork 调用所在函数的前后上下文，看是否有多线程环境
+grep -B5 -A5 "fork()" --include="*.c" <源码树>/ | \
+    grep -c "pthread_create\|pthread_mutex"
+# 结果 > 0 → fork 发生在多线程进程中！
+
+# 第 3 步：检查是否使用了 pthread_atfork
+grep -rn "pthread_atfork" --include="*.c" <源码树>/
+# 结果为空 → 没有注册 fork 前后的锁保护回调！
+# 后果：子进程继承了一个已锁的 mutex，首次 lock 就死锁
+
+# 第 4 步：检查子进程里做了什么（是否调用了非 async-signal-safe 函数）
+grep -A20 "fork()" --include="*.c" <源码_tree>/ | \
+    grep "malloc\|free\|printf\|fopen\|syslog"
+# 结果: 子进程里调用了 malloc → 如果 fork 时另一个线程正在 malloc，
+#        堆的内部锁被继承为"已锁"状态 → 子进程 malloc 死锁或崩溃
+```
+
+**常见 fork 竞态崩溃模式**：
+
+| 模式 | 原因 | 崩溃表现 |
+|---|---|---|
+| 子进程死锁 | fork 时另一线程持锁，子进程继承已锁的 mutex | 子进程 hang（不是 core，但影响监控） |
+| 子进程堆损坏 | fork 时另一线程正在 malloc，堆元数据半更新 | 子进程 malloc abort |
+| stdio 双写 | fork 时另一线程在 printf，缓冲区半满 | 输出乱码或 double free |
+| atexit handlers | 子进程退出时执行了父进程的 cleanup | double free / UAF |
+
+###### 4c-9b. 非线程安全函数的误用
+
+**glibc 中大量函数不是线程安全的**——多线程同时调用会崩溃或数据损坏。
+
+```bash
+# ---- 组 1：明确非线程安全的（多线程调用 = 崩溃） ----
+grep -rn "strtok(\|localtime(\|asctime(\|ctime(\|gethostbyname(\|getpwnam(" \
+    --include="*.c" <源码_tree>/ | grep -v "_r(\|_reentrant"
+# 任何命中都是 bug！应改用 _r 后缀版本（strtok_r/localtime_r/...）
+
+# ---- 组 2：静态缓冲区返回（线程间共享返回值） ----
+grep -rn "inet_ntoa(\|getenv(" --include="*.c" <源码树>/
+# inet_ntoa 返回静态缓冲区——两个线程同时调用会互相覆盖
+# getenv 在 setenv 并发时可能返回悬垂指针
+
+# ---- 组 3：setenv/putenv 与 getenv 的竞态 ----
+grep -rn "setenv\|putenv\|unsetenv" --include="*.c" <源码_tree>/
+# 如果一个线程 setenv，另一个线程 getenv → 可能读到正在修改的指针
+
+# ---- 组 4：信号处理函数中的非 async-signal-safe 调用 ----
+grep -rn "signal(\|sigaction" --include="*.c" <源码树>/ -A5 | \
+    grep "malloc\|free\|printf\|fopen\|lock\|mutex"
+# 信号处理函数里不能调这些！会导致死锁或堆损坏
+
+# ---- 组 5：dlclose 与线程退出竞态 ----
+grep -rn "dlclose\|__attribute__((destructor))" --include="*.c" <源码树>/
+# 检查：是否有线程还在执行 so 中的代码时 dlclose 了该 so？
+
+# ---- 组 6：exit 与线程退出竞态 ----
+grep -rn "exit(\|_exit(\|pthread_exit" --include="*.c" <源码树>/
+# exit() 会执行 atexit/cleanup → 如果另一个线程还在用被 cleanup 的资源 → UAF
+```
+
+###### 4c-9c. malloc/free 的多线程竞态（堆竞技场问题）
+
+**glibc 的堆是分竞技场（arena）的**——不同线程有自己的 arena，但跨线程
+free 另一个线程 arena 中的 chunk 可能触发问题。
+
+```bash
+# 第 1 步：找跨线程 free 的场景
+# 方法：一个线程分配、另一个线程释放
+grep -rn "pthread_create" --include="*.c" <源码树>/ -A5 | grep "malloc"
+grep -rn "free(" --include="*.c" <源码树>/ | grep -v "same_func"
+# 检查：malloc 和 free 是否在不同函数/线程中？
+
+# 第 2 步：检查是否有 tcache 相关的并发问题
+# 症状：console 日志出现 "double free detected in tcache" 或
+#        "unaligned tcache chunk detected"
+grep -rn "MALLOC_CHECK\|mallopt\|M_ARENA" --include="*.c" <源码树>/
+# 如果设置了 M_ARENA_MAX=1 → 所有线程共用一个 arena → 锁竞争加剧
+
+# 第 3 步：检查线程本地存储(TLS)析构与堆的交互
+grep -rn "__thread\|thread_local\|__declspec(thread)" --include="*.c" --include="*.h" <源码_tree>/
+# TLS 变量的析构在线程退出时执行——如果析构函数 free 了堆内存，
+# 而另一个线程同时也在操作那块内存 → 竞态
+
+# 第 4 步：检查 fork 后子进程是否使用了父进程的堆
+# fork 时堆状态被快照——如果父进程有另一个线程正在 malloc/free，
+# 堆链表可能处于不一致状态
+grep -A10 "fork()" --include="*.c" <源码树>/ | \
+    grep "malloc\|free\|realloc\|calloc"
+# 子进程 fork 后立即调用这些 → 可能踩到不一致的堆链表
+```
+
+###### 4c-9d. 信号与多线程的竞态
+
+```bash
+# 第 1 步：找信号处理函数
+grep -rn "signal(\|sigaction(" --include="*.c" <源码_tree>/ | \
+    grep -v "SIG_IGN\|SIG_DFL"
+# 列出所有自定义信号处理函数
+
+# 第 2 步：检查信号处理函数中做了什么
+grep -A10 "void.*signal_handler\|void.*sig_handler" --include="*.c" <源码树>/
+# 以下操作在信号处理函数中是 FORBIDDEN 的：
+# - malloc/free（非 async-signal-safe）
+# - printf/fprintf（可能死锁 stdio 内部锁）
+# - pthread_mutex_lock（如果信号打断了一个已持锁的线程 → 死锁）
+# - 非原子全局变量写入（另一个线程可能正在读）
+
+# 第 3 步：检查信号是否指定了处理线程（sigprocmask/pthread_sigmask）
+grep -rn "pthread_sigmask\|sigprocmask" --include="*.c" <源码_tree>/
+# 最佳实践：主线程 block 所有信号，创建一个专门的信号处理线程
+
+# 第 4 步：检查 SIGSEGV/SIGBUS 处理函数里是否做了复杂操作
+grep -B3 -A10 "SIGSEGV\|SIGBUS" --include="*.c" <源码树>/ | grep -A10 "handler"
+# 在 SIGSEGV handler 里做 backtrace/打印 → 可能二次崩溃（栈溢出时尤其危险）
+```
+
+**glibc 竞态速查表**（加入总结表）：
+
+| 症状 | 根因 | 搜索模式 |
+|---|---|---|
+| fork 后子进程 hang | fork 时其他线程持锁 | `grep fork + pthread_atfork` |
+| fork 后子进程 malloc abort | fork 时堆不一致 | `grep fork 后的 malloc 调用` |
+| 多线程调用同一路径崩 | 非线程安全函数 | `grep strtok/localtime/inet_ntoa（无 _r）` |
+| 信号处理中死锁 | handler 里用了 lock/stdio | `grep handler 内的 lock/printf` |
+| "double free in tcache" | 跨线程 free 或竞态 free | `grep 跨函数的 malloc/free 对` |
+| "unaligned tcache" | tcache 链被踩（UAF/溢出） | `grep memset/strcpy 越界写` |
+| dlclose 后跳飞 | 线程还在用已卸载的 so | `grep dlclose + 线程生命周期` |
+| exit 时 UAF | atexit cleanup 与线程竞态 | `grep atexit + destructor + exit` |
+
+##### 4c-10. 搜索技巧总结
 
 | 你要找什么 | 搜什么 | 适用场景 |
 |---|---|---|
@@ -466,6 +609,11 @@ grep -rn "rename\|tmpfile\|O_TRUNC" --include="*.c" <源码树>/ | grep "db\|dat
 | **文件替换竞态** | `grep -rn "rename\|unlink\|ftruncate" \| grep -v test\|doc` | **进程间文件冲突** |
 | **SQLite 语句泄漏** | `grep -rn "prepare" \| grep -cv "finalize"` | **UAF/double finalize** |
 | **LMDB 事务泄漏** | `grep -rn "txn_begin" \| grep -cv "txn_abort\|txn_commit"` | **写者阻塞/死锁** |
+| **fork 后持锁** | `grep "fork()" -A5 \| grep -c "pthread"` + `grep -rn "pthread_atfork"` | **fork-safe** |
+| **非线程安全函数** | `grep -rn "strtok(\|localtime(\|inet_ntoa(" \| grep -v "_r("` | **线程安全违规** |
+| **信号 handler 违规** | `grep -A10 "signal_handler\|sig_handler" \| grep "malloc\|printf\|lock"` | **async-signal-safe** |
+| **跨线程 free** | `grep -rn "malloc" -A5 \| grep "free" \| grep -v "same_func"` | **tcache 竞态** |
+| **dlclose 竞态** | `grep -rn "dlclose" -A5 \| grep "thread\|pthread"` | **so 卸载竞态** |
 
 #### 4d. 交叉验证
 
