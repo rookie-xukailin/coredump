@@ -58,6 +58,52 @@ EXPECT = {
     "lmdb_close_race":     ("SIGSEGV", "mdb_", False),
     "lmdb_truncate_bus":   ("SIGBUS|总线错误|SIGSEGV", "mdb_", True),
     "dlclose_race":        ("非法内存访问", "plug_worker_call", False),
+    # ---- 批次 1：传统 C 语言经典（#34~#54）----
+    "realloc_dangling":    ("非法内存访问", "fw_config_save", False),
+    "stack_local_return":  ("非法内存访问", "ui_draw_header", True),
+    "free_nonheap":        ("invalid pointer|free", "invalid pointer", False),
+    "uninit_stack_ptr":    ("非法内存访问|空指针", "sensor_use_stale", False),
+    "off_by_one":          ("非法内存访问", "sdr_write_row", False),
+    "int_overflow_alloc":  ("堆|非法内存访问", "net_alloc_table", False),
+    # O1 实测形态：64B 栈缓冲写 256B 先破坏金丝雀 → __stack_chk_fail abort
+    # （console "*** stack smashing detected ***"），栈保护结论同样命中"栈"
+    "sprintf_overflow":    ("栈|加固|非法内存访问", "sprintf_overflow.c:", True),
+    "strlen_noterm":       ("非法内存访问", "strlen_noterm.c:", False),
+    "sizeof_pointer":      ("非法内存访问", "ui_dispatch", False),
+    "union_confusion":     ("空指针", "bus_slot_fire", False),
+    "signed_unsigned":     ("非法内存访问", "pkt_write_at", False),
+    "const_rodata_write":  ("权限|非法内存访问", "cfg_write_byte", False),
+    "endianness_cast":     ("非法内存访问", "net_frame_apply", False),
+    "timer_after_free":    ("非法内存访问", "timer_poll_fire", False),
+    "atexit_stale":        ("非法内存访问", "bmc_session_flush", False),
+    "shutdown_order":      ("非法内存访问", "sess_worker_loop", False),
+    "fd_exhaust":          ("非法内存访问", "dev_open_all", False),
+    "malloc_null":         ("空指针", "cap_alloc_blob", False),
+    "sigpipe_write":       ("SIGPIPE", "ipc_flush_logs", False),
+    "fpe_divzero":         ("SIGFPE", "sensor_ratio", False),
+    "nest_signal":         ("空指针", "nest_segv_handler", False),
+    # ---- 批次 2：硬件/平台/嵌入式特定（#55~#64）----
+    "no_volatile_hw":      ("非法内存访问", "hw_dma_setup", False),
+    # 非对齐访问双形态：对齐检查核上 SIGBUS；否则 LE 旋转错值当偏移 SEGV
+    "unaligned_arm":       ("总线错误|非法内存访问", "unaligned_arm.c:", False),
+    "dma_alignment":       ("总线错误|非法内存访问", "dma_alignment.c:", False),
+    "eeprom_corrupt":      ("0xdeadbeef", "board_hook_invoke", False),
+    "config_array_size":   ("堆|非法内存访问", "cfg_load_table", False),
+    "argv_missing":        ("空指针", "cli_run_request", False),
+    "init_order":          ("空指针", "sensor_bus_read", False),
+    "watchdog_stuck":      ("SIGABRT|abort", "wd_expire", True),
+    "thread_hang_kill":    ("SIGABRT|abort", "cli_cmd_wait", True),
+    "lock_deadlock_kill":  ("SIGABRT|abort", "net_cfg_apply", True),
+    # ---- 批次 3：BMC/OpenBMC 特定（#65~#73）----
+    "ipmi_parse_overflow": ("非法内存访问", "ipmi_parse_cmd", False),
+    "fru_corrupt_parse":   ("非法内存访问", "fru_walk_area", False),
+    "sensor_hotplug":      ("非法内存访问", "sensor_reactivate", False),
+    "i2c_timeout_stale":   ("非法内存访问", "i2c_read_regs", False),
+    "dbus_prop_crash":     ("非法内存访问", "dbus_prop_set", False),
+    "power_transition":    ("非法内存访问", "power_cmd_execute", False),
+    "sel_full_error":      ("空指针", "sel_commit_record", False),
+    "shm_unlink_alive":    ("总线错误|非法内存访问", "shm_far_read", True),
+    "fifo_sigpipe":        ("SIGPIPE", "log_tail_flush", False),
 }
 # 按架构覆盖：qemu-arm 把 UDF 编码上报为 SIGTRAP（真机为 SIGILL）；
 # riscv 的 qemu 翻译层对越过文件 EOF 的访问可能报 SIGBUS 也可能报 SIGSEGV。
@@ -76,6 +122,9 @@ EXPECT_ARCH = {
     ("stomped_late", "riscv64"): ("0x5858585", "stomped_late.c:", False),
     ("rec_delete_race", "riscv64"): ("0x4747474", "rec_delete_race.c:", False),
     ("dlclose_race", "riscv64"): ("非法内存访问", "dlclose_race.c:", False),
+    # arm32 被杀线程的应用帧符号化退化（exidx 展开失败, gdb bt 全 ??），
+    # 栈扫描给出文件级证据 lock_deadlock_kill.c:22（net_cfg_apply 体内）
+    ("lock_deadlock_kill", "arm32"): ("SIGABRT|abort", "lock_deadlock_kill.c:", True),
 }
 ARCHS = ["arm64", "arm32", "riscv64"]
 
