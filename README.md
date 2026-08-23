@@ -59,8 +59,10 @@ vi bmccore.toml      # 只需要改下面 3 行
 必改的 3 行（其他行保持默认）：
 
 ```toml
-# ① 未 strip 编译产物根目录：固件编译输出的存放处（递归扫描，可堆多版本）
-artifact_dir = "/home/bmc/build/output"
+# ① 符号表文件或目录的绝对路径（编译阶段单独产出的 ELF，含 build-id+symtab+DWARF）
+#    单个文件: symbol_table = "/home/bmc/build/symbols/main.elf"
+#    目录:     symbol_table = "/home/bmc/build/symbols/"
+symbol_table = "/home/bmc/build/symbols"
 
 # ② 源码树根：让报告贴出崩溃行前后 5 行源码（没有可不配）
 source_root = "/home/bmc/src/bmc-project"
@@ -126,8 +128,8 @@ python3 ~/bmccore/bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz \
 
 | 现象 | 原因 | 怎么办 |
 |---|---|---|
-| 回溯帧是 `??` 或没有行号 | 产物 strip 了或没编 `-g` | 确认 `artifact_dir` 里是**未 strip** 产物；行号要 `-g` 编译 |
-| 报告说某模块 `missing` | 产物目录里没这个 so | 把对应固件版本的完整产物放进 `artifact_dir`，或 `--module libfoo.so=/路径` 手动指定 |
+| 回溯帧是 `??` 或没有行号 | 符号表 strip 了或没编 `-g` | 确认 `symbol_table` 指向的是**未 strip** 的编译输出；行号要 `-g` 编译 |
+| 报告说某模块 `missing` | 符号表目录里没这个 so | 把对应固件版本的符号表文件补进目录，或 `--module libfoo.so=/路径` 手动指定 |
 | 结论只有"崩溃信号 SIGABRT" | 没给串口日志 | 加 `--console-log`，assert/堆报错的原因都在里面 |
 | 堆取证说"core 中无堆数据" | 设备端 coredump_filter 裁了匿名段 | 检查 `/proc/<pid>/coredump_filter`（默认 0x33 即可） |
 | zstd 压缩包 | 标准库不支持 | 先 `zstd -d` 解开再喂给工具 |
@@ -142,8 +144,8 @@ python3 bmccore.py info <core文件或tar.gz包>
 # 全量分析（自动读同目录/上层的 bmccore.toml）
 python3 bmccore.py analyze <core> [--console-log console.log]
 
-# 手动指定产物/源码（不想写 toml 时）
-python3 bmccore.py analyze <core> --artifact-dir /产物目录 --source-root /源码树
+# 手动指定符号表/源码（不想写 toml 时）
+python3 bmccore.py analyze <core> --symbol-table /符号表文件或目录 --source-root /源码树
 
 # 主程序配不上时强制指定
 python3 bmccore.py analyze <core> --exe /路径/主程序
@@ -184,22 +186,27 @@ python3 bmccore.py analyze 1_core-...tar.gz --offline
 `tests/test_system_matrix.py` 的 `test_system_matrix_offline` 抽样防回退）。
 不加 `--offline` 时，若机器上恰好有 gdb 也会自动用上、没有则同样降级。
 
-## 关于符号表（不需要单独指定）
+## 关于符号表
 
-**不需要手工指定任何符号表文件。** 符号来源就是 `artifact_dir` 里的
-**未 strip 编译产物**（ELF 文件本身，symtab/DWARF 都在里面）：
+**符号表是编译阶段单独产出的文件，使用时通过 `--symbol-table` 指定其绝对路径。**
+
+符号表文件或目录中存放的是**未 strip 的编译输出**（完整 ELF，含 build-id +
+symtab + DWARF），工具按以下方式使用：
 
 1. 工具从 core 的内存映像还原每个已加载模块（主程序 + 每个 so）的
-   **build-id**，与产物目录里的产物按 build-id **自动精确配对**——版本
-   不符会明确报 mismatch，绝不静默用错符号；
-2. 函数名来自产物 symtab，行号来自产物 DWARF（`.debug_line`）；
-   因此要求固件编译时保留符号：**不要 strip**，且行号需要 `-g`
+   **build-id**，与符号表目录里的文件按 build-id **自动精确配对**——
+   版本不符会明确报 mismatch，绝不静默用错符号；
+2. 函数名来自符号表 symtab，行号来自符号表 DWARF（`.debug_line`）；
+   因此要求编译时保留符号：**不要 strip**，且行号需要 `-g`
    （仅 `-O1` 不加 `-g` 时函数名仍可用，行号缺失会如实标注）；
 3. 配不上时的逃生门：`--exe /路径/主程序`、`--module libfoo.so=/路径`
-   （可多次），或把对应固件版本的完整产物补进 `artifact_dir`。
+   （可多次），或把对应固件版本的符号表文件补进目录。
 
-注意：单独的 `.debug` 分离文件 / debuginfod 暂不支持——请保证
-`artifact_dir` 里是未 strip 的完整 ELF。
+符号表文件可以是以下任一形态（工具自动识别 ELF 格式）：
+- **完整未 strip ELF**（推荐）：编译输出的原始文件，含 .text/.data/
+  .debug_* 全部段——call 指令验证可直接读 .text 字节
+- **objcopy --only-keep-debug 产物**：.text 等段变 NOBITS，工具自动
+  回退从 core 内存读指令字节（功能不减，速度稍慢）
 
 ## 测试
 

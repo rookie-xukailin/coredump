@@ -89,7 +89,7 @@ def read_artifact_info(path):
 
 
 def scan_artifacts(root):
-    """递归扫描产物目录，返回 Artifact 列表。"""
+    """递归扫描符号表目录，返回 Artifact 列表。"""
     arts = []
     if not root or not os.path.isdir(root):
         return arts
@@ -105,6 +105,25 @@ def scan_artifacts(root):
             if info:
                 arts.append(info)
     return arts
+
+
+def load_symbol_tables(path):
+    """从用户指定的符号表文件或目录加载符号表。
+
+    用户的工程在编译阶段用 objcopy --only-keep-debug（或等价方式）把
+    符号表/调试信息从固件 ELF 中提取为独立文件，部署到设备的是 strip
+    后的固件。分析 core 时需要用这些分离的符号表文件来配对。
+
+    path 可以是：
+      - 单个符号表文件的绝对路径（如 /home/bmc/build/symbols/main.elf）
+      - 符号表目录的绝对路径（递归扫描其下所有 ELF 文件）
+    """
+    if not path:
+        return []
+    if os.path.isfile(path):
+        info = read_artifact_info(path)
+        return [info] if info else []
+    return scan_artifacts(path)
 
 
 def match_modules(modules, artifacts, overrides=None, exe_hint=None):

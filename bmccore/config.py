@@ -60,7 +60,7 @@ class Config(object):
     """全量配置（含默认值）。字段与 CLI 一一对应。"""
 
     def __init__(self):
-        self.artifact_dir = None
+        self.symbol_table = None     # 符号表文件/目录的绝对路径（编译阶段单独产出）
         self.source_root = None
         self.sysroot = None
         self.toolchain = {}          # {arch_name: {"prefix": ..., "gdb": ..., ...}}
@@ -82,7 +82,7 @@ class Config(object):
     def update_from_toml(self, path):
         data = load_toml(path)
         top = data.get("", {})
-        for k in ("artifact_dir", "source_root", "sysroot", "console_log", "exe",
+        for k in ("symbol_table", "source_root", "sysroot", "console_log", "exe",
                   "glibc_version", "output"):
             if k in top and getattr(self, k) is None:
                 setattr(self, k, top[k])
@@ -103,7 +103,7 @@ class Config(object):
 
     def update_from_cli(self, args):
         mapping = {
-            "artifact_dir": "artifact_dir", "source_root": "source_root",
+            "symbol_table": "symbol_table", "source_root": "source_root",
             "sysroot": "sysroot", "console_log": "console_log", "exe": "exe",
             "glibc_version": "glibc_version", "output": "output",
             "fmt": "format", "crash_thread_only": "crash_thread_only",

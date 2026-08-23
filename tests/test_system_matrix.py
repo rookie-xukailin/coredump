@@ -9,12 +9,12 @@
   4. backtrace ok（标记 degrade 的维度允许降级为栈扫描/判定性结论）
 
 运行条件（默认跳过，保证单测快速）：
-    export BMCCORE_SYSTEM_WORK=/path/to/work      # 含 cores/ artifacts/ cases/
+    export BMCCORE_SYSTEM_WORK=/path/to/work      # 含 cores/ symtab/ cases/
     python tests/run_all.py                       # 或单跑 pytest tests/test_system_matrix.py
 
 BMCCORE_SYSTEM_WORK 目录布局（与本仓库 tools/gen 脚本产物一致）：
     cores/        99 格 core（<case>_<arch>.core[.gz] 或 1_core-*_<case>_<arch>-*.tar.gz）
-    artifacts/    未 strip 产物（build-id 配对）
+    symtab/       分离符号表（objcopy --only-keep-debug 产出，build-id 配对）
     cases/        案例源码（源码联动）
     logs/matrix/  <case>.<arch>.console.log（可选，abort 类归因）
 """
@@ -59,7 +59,7 @@ def _run_matrix():
     logs_dir = os.path.join(work, "logs", "matrix")
 
     cfg = Config()
-    cfg.artifact_dir = os.path.join(work, "artifacts")
+    cfg.symbol_table = os.path.join(work, "symtab")
     cfg.source_root = os.path.join(work, "cases")
     cfg.toolchain = {
         "arm64": {"prefix": "aarch64-linux-gnu-", "gdb": "/usr/bin/gdb-multiarch"},
@@ -154,7 +154,7 @@ def test_system_matrix_offline():
     cfg = Config()
     cfg.offline = True                     # 不探测任何外部工具
     cfg.toolchain = {}
-    cfg.artifact_dir = os.path.join(work, "artifacts")
+    cfg.symbol_table = os.path.join(work, "symtab")
     cfg.source_root = os.path.join(work, "cases")
 
     fails = []

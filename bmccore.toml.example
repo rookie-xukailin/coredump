@@ -1,8 +1,10 @@
 # bmccore 配置模板 —— 拷贝为 bmccore.toml 放在core文件同级目录（或其上层目录）。
 # 编译服务器路径固定时配一次，日常使用只需: python3 bmccore.py analyze <core包>
 
-# 未strip编译产物根目录（递归扫描，可堆多版本，按build-id自动配对）
-artifact_dir = "/home/bmc/build/output"
+# 符号表文件或目录的绝对路径（编译阶段单独产出的文件，含build-id+symtab+DWARF）
+# - 单个文件: symbol_table = "/home/bmc/build/symbols/main.elf"
+# - 目录:     symbol_table = "/home/bmc/build/symbols/"
+symbol_table = "/home/bmc/build/symbols"
 
 # 源码树根（报告贴崩溃行上下文）
 source_root = "/home/bmc/src/bmc-project"
@@ -27,9 +29,9 @@ sysroot = "/home/bmc/build/rootfs"
 # [toolchain.riscv64]
 # prefix = "riscv64-linux-gnu-"
 
-# ---- 手动指定某模块产物（自动配对失败时的逃生门）----
+# ---- 手动指定某模块符号表（自动配对失败时的逃生门）----
 # [module]
-# libfoo.so = "/home/bmc/build/output/lib/libfoo.so.1.2"
+# libfoo.so = "/home/bmc/build/symbols/libfoo.so.1.2"
 
 # 栈扫描最大深度（字节）
 # max_scan_depth = 65536

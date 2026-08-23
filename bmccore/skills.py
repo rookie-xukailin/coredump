@@ -45,9 +45,9 @@ class Pipeline(object):
         artifacts = []
         exe_match = None
         if "symbols" in want:
-            if cfg.artifact_dir:
-                self.log("[符号] 扫描产物目录 %s ..." % cfg.artifact_dir)
-                artifacts = symbols_mod.scan_artifacts(cfg.artifact_dir)
+            if cfg.symbol_table:
+                self.log("[符号] 读取符号表 %s ..." % cfg.symbol_table)
+                artifacts = symbols_mod.load_symbol_tables(cfg.symbol_table)
                 modules = group_modules(core)
                 matches = symbols_mod.match_modules(modules, artifacts,
                                                     overrides=cfg.modules)
@@ -72,7 +72,7 @@ class Pipeline(object):
                            "" if matches else "未解析到模块")
                 self.log("[符号] %d/%d 模块配上符号" % (n_ok, len(matches)))
             else:
-                self._mark("symbols", "skipped", "未配置 --artifact-dir")
+                self._mark("symbols", "skipped", "未配置 --symbol-table")
         else:
             self._mark("symbols", "skipped", "未启用")
 

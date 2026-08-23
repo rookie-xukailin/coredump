@@ -139,7 +139,9 @@ def main(argv=None):
 
     p_an = sub.add_parser("analyze", parents=[common], help="全量分析并输出报告")
     p_an.add_argument("core", help="core 文件或 tar.gz 包")
-    p_an.add_argument("--artifact-dir", help="未strip编译产物根目录")
+    p_an.add_argument("--symbol-table", metavar="PATH",
+                      help="符号表文件或目录的绝对路径（编译阶段单独产出的 ELF/"
+                           "符号表文件，含 build-id+symtab+DWARF）")
     p_an.add_argument("--source-root", help="源码树根目录")
     p_an.add_argument("--sysroot", help="固件staging根文件系统")
     p_an.add_argument("--toolchain-prefix", help="交叉工具链前缀（如 aarch64-linux-gnu-）")
