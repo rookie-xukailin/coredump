@@ -143,6 +143,40 @@ _RISCV_REGS = (["pc", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1"]
                + ["s%d" % i for i in range(2, 12)]
                + ["t%d" % i for i in range(3, 7)])
 
+# x86_64: r15,r14,r13,r12,rbp,rbx,r11..r8,rax,rcx,rdx,rsi,rdi,orig_rax,
+#          rip,cs,eflags,rsp,ss,fs_base,gs_base,ds,es,fs,gs
+_X86_64_REGS = (["r15", "r14", "r13", "r12", "rbp", "rbx",
+                 "r11", "r10", "r9", "r8", "rax", "rcx",
+                 "rdx", "rsi", "rdi", "orig_rax",
+                 "rip", "cs", "eflags", "rsp", "ss",
+                 "fs_base", "gs_base", "ds", "es", "fs", "gs"])
+
+# i386: ebx,ecx,edx,esi,edi,ebp,eax,ds,es,fs,gs,orig_eax,eip,cs,eflags,esp,ss
+_I386_REGS = (["ebx", "ecx", "edx", "esi", "edi", "ebp", "eax",
+               "ds", "es", "fs", "gs", "orig_eax",
+               "eip", "cs", "eflags", "esp", "ss"])
+
+
+def _x86_64_is_call(prev8, addr, value):
+    """x86_64: CALL rel32 (E8 xx xx xx xx) / CALL r/m64 (FF /2)。
+    prev8[4:8] 是紧贴候选地址的 4 字节指令。"""
+    if len(prev8) >= 5:
+        b = prev8[3]   # CALL rel32 的操作码在候选-5 处
+        if b == 0xE8:
+            return True, "x86_64 CALL rel32"
+    if len(prev8) >= 2:
+        b0 = prev8[6]  # FF /2 的 opcode 在候选-2 处
+        b1 = prev8[7]
+        if b0 == 0xFF and (b1 & 0x38) == 0x10:   # ModRM reg=010 (CALL)
+            return True, "x86_64 CALL r/m64"
+    return False, "x86_64但前指令不是call"
+
+
+def _i386_is_call(prev8, addr, value):
+    """i386: CALL rel32 (E8) / CALL r/m32 (FF /2)。"""
+    return _x86_64_is_call(prev8, addr, value)
+
+
 ARM32 = ArchInfo("arm32", 40, 32, _ARM32_REGS,
                  "pc", "sp", "lr", "fp",
                  is_call=_arm32_is_call, thumb_aware=True)
@@ -159,11 +193,21 @@ RISCV32 = ArchInfo("riscv32", 243, 32, _RISCV_REGS,
                    "pc", "sp", "ra", "s0",
                    is_call=_riscv_is_call)
 
+X86_64 = ArchInfo("x86_64", 62, 64, _X86_64_REGS,
+                  "rip", "rsp", "rip", "rbp",       # x86 无独立 LR，用 RIP 兼代
+                  is_call=_x86_64_is_call)
+
+I386 = ArchInfo("i386", 3, 32, _I386_REGS,
+                "eip", "esp", "eip", "ebp",
+                is_call=_i386_is_call)
+
 _BY_MACHINE_CLASS = {
     (40, 32): ARM32,
     (183, 64): ARM64,
     (243, 64): RISCV64,
     (243, 32): RISCV32,
+    (62, 64): X86_64,          # EM_X86_64
+    (3, 32): I386,             # EM_386
 }
 
 
@@ -175,4 +219,4 @@ def arch_for(machine, elfclass):
 
 
 def all_archs():
-    return [ARM32, ARM64, RISCV64, RISCV32]
+    return [ARM32, ARM64, RISCV64, RISCV32, X86_64, I386]

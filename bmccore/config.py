@@ -77,6 +77,10 @@ class Config(object):
         self.offline = False        # 离线模式：不探测/调用任何外部工具
         self.max_scan_depth = 65536  # 栈扫描最大深度（字节）
         self.max_frames = 50
+        self.debuginfod_url = None   # debuginfod 远程符号服务器
+        self.viz = False             # 是否启动可视化
+        self.viz_port = 8080         # 可视化首选端口
+        self.viz_timeout = 0         # 可视化超时（秒）
 
     # ------------------------------------------------------------------
     def update_from_toml(self, path):

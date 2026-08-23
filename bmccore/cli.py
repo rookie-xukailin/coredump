@@ -161,7 +161,21 @@ def main(argv=None):
     p_an.add_argument("--debug", action="store_true")
     p_an.add_argument("--max-scan-depth", type=int, default=None,
                       help="栈扫描最大深度（字节），默认65536")
+    p_an.add_argument("--viz", action="store_true",
+                      help="分析完成后启动内存可视化 Web 面板")
+    p_an.add_argument("--viz-port", type=int, default=8080,
+                      help="可视化面板首选端口（被占用时自动+1，默认8080）")
+    p_an.add_argument("--viz-timeout", type=int, default=0,
+                      help="可视化面板超时秒数（0=持续运行，默认0）")
+    p_an.add_argument("--debuginfod-url",
+                      help="debuginfod 服务器 URL（远程符号拉取）")
     p_an.set_defaults(func=cmd_analyze)
+
+    p_viz = sub.add_parser("viz", parents=[common],
+                           help="单独启动内存可视化（需已生成报告）")
+    p_viz.add_argument("core", help="core 文件")
+    p_viz.add_argument("--port", type=int, default=8080, help="首选端口")
+    p_viz.add_argument("--timeout", type=int, default=0, help="超时秒（0=持续）")
 
     args = ap.parse_args(argv)
     return args.func(args)

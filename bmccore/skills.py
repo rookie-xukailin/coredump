@@ -7,6 +7,7 @@ import os
 
 from . import console as console_mod
 from . import heap as heap_mod
+from . import lockmon as lockmon_mod
 from . import scan as scan_mod
 from . import symbols as symbols_mod
 from . import toolchain as toolchain_mod
@@ -17,7 +18,8 @@ from .modules import group_modules
 from .report import Report
 from .source import SourceIndex
 
-ALL_SKILLS = ("symbols", "backtrace", "scan", "heap", "console", "triage", "source")
+ALL_SKILLS = ("symbols", "backtrace", "scan", "heap", "console", "triage",
+              "source", "cfi", "locks", "viz")
 
 
 class Pipeline(object):
@@ -201,6 +203,36 @@ class Pipeline(object):
         else:
             self._mark("source", "skipped", "未启用或未配置 --source-root")
 
+        # ---- 8. CFI 离线回溯（精确展开，无 gdb 时的最佳兜底） ----
+        cfi_frames = None
+        if "cfi" in want and core.crash_thread:
+            from .ehframe import cfi_unwind
+            exe_artifact = exe_match.artifact if exe_match else None
+            if exe_artifact:
+                arch_name = core.arch.name if core.arch else "x86_64"
+                cfi_frames = cfi_unwind(core, core.crash_thread,
+                                        arch_name, exe_artifact.path,
+                                        cfg.max_frames)
+            if cfi_frames:
+                self._mark("cfi", "ok", "%d 帧（.eh_frame 精确展开）" % len(cfi_frames))
+            else:
+                self._mark("cfi", "skipped", "无 .eh_frame 或展开失败")
+
+        # ---- 9. 线程锁关联分析 ----
+        lock_result = None
+        if "locks" in want and len(core.threads) > 1:
+            lock_result = lockmon_mod.analyze_locks(core, core.threads)
+            if lock_result.has_deadlock:
+                self._mark("locks", "ok", "⚠ 检测到死锁！")
+            elif lock_result.wait_graph:
+                self._mark("locks", "ok", "%d 条等待关系" % len(lock_result.wait_graph))
+            elif lock_result.locks:
+                self._mark("locks", "ok", "%d 个活跃锁（无等待/死锁）" % len(lock_result.locks))
+            else:
+                self._mark("locks", "skipped", "未检测到锁活动")
+        else:
+            self._mark("locks", "skipped", "单线程或未启用")
+
         return {
             "core": core,
             "matches": matches,
@@ -213,6 +245,8 @@ class Pipeline(object):
             "status": dict(self.status),
             "raw_gdb": raw_gdb,
             "toolchain": tchain,
+            "cfi_frames": cfi_frames,
+            "lock_result": lock_result,
         }
 
 
