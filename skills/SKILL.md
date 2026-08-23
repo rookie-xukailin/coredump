@@ -292,20 +292,180 @@ grep -rn "offsetof.*fan_ctrl\|offsetof.*set_pwm" --include="*.c" <源码树>/
 # 找到这些偏移对应的结构体 → 就是嫌疑对象
 ```
 
-##### 4c-7. 搜索技巧总结
+##### 4c-7. 跨进程共享资源分析（进程间竞态/共享内存损坏场景）
 
-| 你要找什么 | 搜什么 | 工具 |
+BMC 上多个守护进程共享数据库/共享内存/信号量，崩溃可能由另一个进程的
+操作引发。你需要跨进程追踪公共接口和共享资源的所有使用者。
+
+**核心思路：崩溃进程只是受害者，肇事者可能在另一个进程里。**
+
+```bash
+# ---- 第 1 步：识别共享资源的类型 ----
+
+# 共享内存 (mmap MAP_SHARED / shm_open)
+grep -rn "shm_open\|mmap.*MAP_SHARED\|shmget\|shmctl" --include="*.c" <源码树>/
+
+# 共享数据库文件 (SQLite/LMDB/自定义格式)
+grep -rn "sqlite3_open\|mdb_env_open\|open.*\.db\|open.*\.mdb" --include="*.c" <源码树>/
+
+# 进程间通信 (消息队列/管道/套接字)
+grep -rn "mq_open\|msgget\|pipe(\|socketpair\|unix_socket" --include="*.c" <源码树>/
+
+# 文件锁 (flock/fcntl)
+grep -rn "flock\|fcntl.*F_SETLK\|fcntl.*F_OFD_SETLK" --include="*.c" <源码树>/
+
+# ---- 第 2 步：找共享资源的所有进程使用者 ----
+
+# 方法 A：按数据库/共享文件路径搜（找到所有打开同一文件的进程）
+grep -rn "/var/lib/sensor_db\|/dev/shm/bmc_\|/tmp/bmc_" --include="*.c" <源码树>/
+# 结果: 进程A sensor_mgr.c:42 打开了 sensor_db
+#        进程B cli_tool.c:28 也打开了 sensor_db！  ← 两个进程共用
+
+# 方法 B：按 shm 名称搜
+grep -rn "shm_open.*bmc\|/dev/shm/bmc" --include="*.c" <源码_tree>/
+# 结果: 进程A writer.c:30 创建了 /dev/shm/bmc_status
+#        进程B reader.c:25 attach 了同一共享内存  ← 共享
+
+# 方法 C：搜索公共头文件中的 extern 全局变量（跨 .so 共享）
+grep -rn "extern.*g_shared\|extern.*g_db\|extern.*g_status" --include="*.h" <源码树>/
+
+# ---- 第 3 步：分析公共接口的使用规范 ----
+
+# 找接口的声明（头文件中的 API 定义）
+grep -rn "db_get\|db_put\|db_delete\|db_reload\|db_compact" --include="*.h" <源码树>/
+# 结果: int db_get(struct db_handle *, const char *key, void *buf, size_t len);
+
+# 找接口的所有实现（可能有多个后端）
+grep -rn "int db_get" --include="*.c" <源码树>/
+# 结果: db_sqlite.c:120 实现 A (SQLite 后端)
+#        db_lmdb.c:85 实现 B (LMDB 后端)
+
+# 找接口的所有调用者（跨进程分析的关键）
+grep -rn "db_get(" --include="*.c" <源码树>/ | grep -v "db_get.*{$\|int db_get\|\.h:"
+# 结果: sensor_mgr.c:230 (进程A调用)
+#        cli_tool.c:85 (进程B也调用！)  ← 多进程并发使用
+
+# ---- 第 4 步：检查接口的线程/进程安全声明 ----
+
+# 找接口的注释和文档
+grep -B5 "int db_get" --include="*.h" -r <源码树>/
+# 看有没有说明 "thread-safe" / "NOT thread-safe" / "caller must hold lock"
+
+# 找接口内部的锁
+grep -A20 "int db_get" --include="*.c" -r <源码树>/ | grep "mutex\|lock\|sem"
+# 结果: db_sqlite.c:125 有 pthread_mutex_lock  ← SQLite 后端有锁
+#        db_lmdb.c:90 没有任何锁！             ← LMDB 后端无锁！ ← 嫌疑
+
+# ---- 第 5 步：分析数据库操作的一致性 ----
+
+# 事务边界（SQLite）
+grep -rn "BEGIN\|COMMIT\|ROLLBACK\|sqlite3_exec.*TRANSACTION" --include="*.c" <源码树>/
+# 检查: 是否所有写操作都在事务里？有没有裸写？
+
+# 锁粒度（LMDB）
+grep -rn "MDB_RDONLY\|mdb_txn_begin\|mdb_txn_commit\|mdb_txn_abort" --include="*.c" <源码_tree>/
+# 检查: 写事务是否独占？读事务是否长寿（阻塞写者）？
+
+# 文件锁协调
+grep -rn "flock.*LOCK_EX\|flock.*LOCK_SH\|fcntl.*F_SETLK" --include="*.c" <源码树>/
+# 检查: 所有进程是否遵循相同的锁协议？有没有绕过锁直接操作的？
+```
+
+**跨进程分析的关键模式**：
+
+| 场景 | 搜索目标 | 判断标准 |
 |---|---|---|
-| 指纹字符串 | `grep -rn "指纹内容"` | 直接命中 |
-| 变量的所有赋值 | `grep -rn "varname\s*="` | 追溯来源 |
+| 共享内存踩踏 | `mmap.*MAP_SHARED` 的所有调用者 | 写入者是否有互斥保护？偏移是否越界？ |
+| 数据库并发损坏 | `db_xxx(` 的跨进程调用者 | 是否使用事务？是否有进程绕过 API 直接写文件？ |
+| 文件替换竞态 | `rename\|unlink\|ftruncate` 的调用者 | 其他进程是否还在使用旧 fd/映射？ |
+| 共享 so 重载 | `dlopen\|dlclose\|LD_LIBRARY_PATH` | 卸载时是否有其他进程还在调用其中的函数？ |
+| 信号量死锁 | `sem_wait\|sem_post` 的所有调用点 | 是否所有路径都成对 wait/post？ |
+
+**特别注意**：core 只包含崩溃进程的内存映像——**另一个进程（肇事者）的
+栈和堆你看不到**。你只能通过以下间接证据推断肇事者的行为：
+- 共享内存中的脏数据（指纹/垃圾值）
+- 数据库文件的异常状态（损坏的页面/索引）
+- 文件时间戳与 core 生成时间的关系
+- console 日志中两个进程的交错输出
+
+##### 4c-8. 数据库接口深度分析（SQLite/LMDB/自定义格式）
+
+**当崩溃涉及数据库操作时，你需要额外检查以下几类问题：**
+
+```bash
+# ---- SQLite 场景 ----
+
+# 1. 连接生命周期
+grep -rn "sqlite3_open\|sqlite3_close\|sqlite3_close_v2" --include="*.c" <源码树>/
+# 检查: open 和 close 是否在同一进程？是否有多线程共享连接（不允许）？
+
+# 2. 语句生命周期
+grep -rn "sqlite3_prepare\|sqlite3_finalize\|sqlite3_step" --include="*.c" <源码树>/
+# 检查: prepare 后是否一定 finalize？是否有 double finalize？
+#        step 过程中是否有其他线程 close 了连接？
+
+# 3. 事务完整性
+grep -rn "sqlite3_exec.*BEGIN\|sqlite3_exec.*COMMIT\|sqlite3_exec.*ROLLBACK" --include="*.c" <源码_tree>/
+# 检查: 所有写操作是否在事务里？异常路径是否有 ROLLBACK？
+
+# 4. mmap 模式
+grep -rn "PRAGMA mmap_size\|sqlite3_config.*mmap" --include="*.c" <源码树>/
+# 如果启用了 mmap：外部截断 db 文件会导致 SIGBUS（工具报告会体现）
+
+# ---- LMDB 场景 ----
+
+# 1. 环境生命周期
+grep -rn "mdb_env_create\|mdb_env_open\|mdb_env_close\|mdb_env_sync" --include="*.c" <源码树>/
+# 检查: close 时是否有其他线程/进程正在操作？
+
+# 2. 事务边界
+grep -rn "mdb_txn_begin\|mdb_txn_commit\|mdb_txn_abort\|mdb_txn_reset" --include="*.c" <源码树>/
+# 检查: 写事务是否有嵌套？读事务是否忘记 abort（会阻塞写者）？
+#        double abort（同一 txn abort 两次）？
+
+# 3. 游标生命周期
+grep -rn "mdb_cursor_open\|mdb_cursor_close\|mdb_cursor_get" --include="*.c" <源码_tree>/
+# 检查: cursor 是否在 txn abort 之后还在使用（UAF）？
+
+# 4. map size 管理
+grep -rn "mdb_env_set_mapsize\|mdb_env_info" --include="*.c" <源码树>/
+# 检查: 多进程是否设置了不同的 mapsize（可能导致越界访问）？
+
+# ---- 自定义格式（flat file / binary）----
+
+# 1. 文件读写协议
+grep -rn "fread\|fwrite\|pread\|pwrite\|mmap" --include="*.c" <源码树>/ | grep "db\|data\|store"
+# 检查: 读写是否有互斥？是否原子？
+
+# 2. 文件锁
+grep -rn "flock\|fcntl.*LOCK" --include="*.c" <源码_tree>/ | grep "db\|data"
+# 检查: 是否所有访问者都遵循锁协议？
+
+# 3. 原子替换
+grep -rn "rename\|tmpfile\|O_TRUNC" --include="*.c" <源码树>/ | grep "db\|data\|store"
+# 检查: 替换文件时是否有其他进程还在用旧文件？
+```
+
+##### 4c-9. 搜索技巧总结
+
+| 你要找什么 | 搜什么 | 适用场景 |
+|---|---|---|
+| 指纹字符串 | `grep -rn "指纹内容"` | 堆被踩 |
+| 变量的所有赋值 | `grep -rn "varname\s*="` | 空指针追溯 |
 | 变量的所有使用 | `grep -rn "varname->\|varname\."` | 找读写点 |
-| 谁释放了它 | `grep -rn "free.*varname\|varname\s*=\s*NULL"` | 找释放路径 |
-| 谁初始化了它 | `grep -rn "init.*varname\|varname\s*=\s*malloc\|varname\s*=\s*new"` | 找初始化 |
-| 无边界检查的拷贝 | `grep -rn "strcpy\|memcpy\|sprintf" \| grep -v "n\|bounds"` | 找溢出点 |
-| 函数指针赋值 | `grep -rn "->func\|\.func\s*=" \| grep -v NULL` | 找回调注册 |
-| 锁保护缺失 | `grep -rn "shared_var" \| grep -cv "lock\|mutex\|atomic"` | 竞态检测 |
-| 结构体定义 | `grep -rn "struct.*name" --include="*.h" -A 20` | 理解偏移 |
-| 所有调用者 | `grep -rn "function_name(" \| grep -v "static\|inline\|define"` | 调用链 |
+| 谁释放了它 | `grep -rn "free.*varname\|varname\s*=\s*NULL"` | UAF/双释放 |
+| 谁初始化了它 | `grep -rn "init.*varname\|varname\s*=\s*malloc"` | 初始化遗漏 |
+| 无边界检查的拷贝 | `grep -rn "strcpy\|memcpy\|sprintf" \| grep -v "n\|bounds"` | 堆/栈溢出 |
+| 函数指针赋值 | `grep -rn "->func\|\.func\s*=" \| grep -v NULL` | 坏回调 |
+| 锁保护缺失 | `grep -rn "shared_var" \| grep -cv "lock\|mutex\|atomic"` | 竞态 |
+| 结构体定义 | `grep -rn "struct.*name" --include="*.h" -A 20` | 偏移验证 |
+| 所有调用者 | `grep -rn "function_name(" \| grep -v "static\|inline"` | 调用链 |
+| **共享内存的进程** | `grep -rn "shm_open\|mmap.*SHARED" \| grep -v "#"` | **跨进程竞态** |
+| **数据库接口调用者** | `grep -rn "db_get(\|db_put(" \| grep -v "\.h:"` | **多进程DB并发** |
+| **事务完整性** | `grep -rn "BEGIN\|COMMIT\|ROLLBACK"` | **数据库一致性** |
+| **文件替换竞态** | `grep -rn "rename\|unlink\|ftruncate" \| grep -v test\|doc` | **进程间文件冲突** |
+| **SQLite 语句泄漏** | `grep -rn "prepare" \| grep -cv "finalize"` | **UAF/double finalize** |
+| **LMDB 事务泄漏** | `grep -rn "txn_begin" \| grep -cv "txn_abort\|txn_commit"` | **写者阻塞/死锁** |
 
 #### 4d. 交叉验证
 
