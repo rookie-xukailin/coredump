@@ -1,14 +1,14 @@
-# 任务完成：73 维度 × 3 架构 = 219 格全量系统测试
+# 任务完成：78 维度 × 3 架构 = 234 格全量系统测试
 
-> 本文件是跨会话任务清单。**当前任务已全部完成**（2026-08-23）。
+> 本文件是跨会话任务清单。**当前任务已全部完成**（2026-08-24，含消息队列批次）。
 
 ## 最终状态
 
-- ✅ 33 旧维度 + 40 新维度（#34~#73）全部实现，三平台（arm64/arm32/riscv64）测试通过
-- ✅ 判定结果：**PASS 217 / FAIL 0 / SKIP 2**
+- ✅ 33 旧维度 + 45 新维度（#34~#78）全部实现，三平台（arm64/arm32/riscv64）测试通过
+- ✅ 判定结果：**PASS 232 / FAIL 0 / SKIP 2**
   - 2 个 SKIP 为既有环境限制（lmdb_truncate_bus arm64/arm32：qemu 内部 SIGBUS 无法 gcore，
      manifest 已登记；该维度的 riscv64 格完整验证）
-- ✅ 可视化校验：218 格（全部有 core 的格）面板数据构建+结构断言 **VIZ PASS 218 / FAIL 0**
+- ✅ 可视化校验：233 格（全部有 core 的格）面板数据构建+结构断言 **VIZ PASS 233 / FAIL 0**
 - ✅ 浏览器抽查：索引页 + 每批次每平台代表格 + 全部特殊信号（SIGPIPE/SIGFPE/SIGBUS/SIGABRT/SIGILL/SIGTRAP）
   面板渲染无异常；画廊服务 `python3 tools/viz_gallery.py`（localhost:8080）可浏览全部格
 - ✅ `python tests/run_all.py` 全过（含 BMCCORE_SYSTEM_WORK 系统测试）
@@ -51,6 +51,15 @@ ipmi_parse_overflow（crafted 长度跨步扫描）、fru_corrupt_parse（区域
 sensor_hotplug（悬垂句柄）、i2c_timeout_stale（旧缓存指针）、dbus_prop_crash（在途属性请求 UAF）、
 power_transition（S5 切换释放在途命令）、sel_full_error（写满 NULL 未判空）、
 shm_unlink_alive（对象移除+收缩后远读 SIGBUS）、fifo_sigpipe（FIFO 对端退出 SIGPIPE）
+
+### 批次 4：消息队列（5 个，#74~#78）
+| 名称 | 机理 | 实现要点 |
+|---|---|---|
+| mq_consumer_uaf | POSIX mq 消费者线程阻塞接收，停止路径先 free 大块 ctx 再投唤醒消息 | qemu 未实现 mq_notify(ENOSYS)，通知语义以阻塞消费者线程实现；崩溃线程=消费者 |
+| mq_recv_truncate | 接收缓冲按旧版 8B 分配，mq_receive 以 EMSGSIZE 拒收且返回值未检查 | 残留旧消息的长度字段(0x77000000)被当新消息解析 → 野偏移读 |
+| mq_deser_overflow | 消息载荷长度字段由对端控制且未校验上限 | crafted len=0x7770 反序列化拷贝越过数据页触保护页 |
+| msgq_rmid_race | SysV 队列被 fork 出的管理进程 IPC_RMID，阻塞中 msgrcv 以 EIDRM 返回 -1 | -1 未检查被当消息长度，转无符号 64KB 块偏移 |
+| queue_ring_overrun | 自研环形队列满判断在批量路径被绕过 | 64B×100 连续入队越过数据页，[元数据页][数据页][保护页]布局 |
 
 ## qemu-user 环境适配（生成层，不影响真机语义）
 

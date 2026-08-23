@@ -1,6 +1,6 @@
 # tools/ —— 系统测试 core 生成与分析基础设施
 
-本目录包含 73 维度 × 3 架构 = 219 格系统测试的完整生成、分析、判定、可视化流水线。
+本目录包含 78 维度 × 3 架构 = 234 格系统测试的完整生成、分析、判定、可视化流水线。
 
 ## 目录结构
 
@@ -13,10 +13,10 @@ tools/
 │   ├── fix_riscv_prstatus.py  riscv64 PRSTATUS 扩容到 376 字节（gdb 只认该尺寸）
 │   └── corepatch.py          core 文件中部插字节时同步维护节头表
 ├── verdict/             程序化判定
-│   ├── verdict_matrix.py     在线模式全量判定（219 格）
+│   ├── verdict_matrix.py     在线模式全量判定（234 格）
 │   ├── verdict_offline.py    离线模式全量判定
 │   └── offline_matrix.sh     离线批量分析
-├── gen_matrix.sh        【主入口】生成 219 格 core（编译→qemu运行→gcore→保真→打包）
+├── gen_matrix.sh        【主入口】生成 234 格 core（编译→qemu运行→gcore→保真→打包）
 ├── make_cases.sh        基础 12 维度案例源码（空指针/堆/栈/信号/多线程/so）
 ├── make_cases2.sh       高难度 9 维度（SIGILL/NUL投毒/UAF复用/深链/巨栈/dlopen/信号处理/跨线程/静默踩）
 ├── make_cases_conc.sh   并发 6 维度（线程间/进程间×数据库资源移动/删除/修改）
@@ -25,11 +25,12 @@ tools/
 ├── make_cases3.sh       批次1·传统 C 语言经典 21 维度（#34~#54）
 ├── make_cases4.sh       批次2·硬件/平台/嵌入式 10 维度（#55~#64）
 ├── make_cases5.sh       批次3·BMC/OpenBMC 特定 9 维度（#65~#73）
-├── analyze_matrix.sh    批量分析 219 格（符号表模式）
+├── make_cases6.sh       批次4·消息队列 5 维度（#74~#78）
+├── analyze_matrix.sh    批量分析 234 格（符号表模式）
 ├── build_third.sh       编译 SQLite/LMDB 三架构共享库
 ├── make_symtables2.sh   构建符号表目录（拷贝未strip ELF + libc/ld）
 ├── viz_check.py         可视化面板全量校验（逐格构建 viz 数据 + 结构断言）
-├── viz_gallery.py       全量格可视化画廊（localhost:8080 浏览全部 219 格）
+├── viz_gallery.py       全量格可视化画廊（localhost:8080 浏览全部 234 格）
 ├── summarize_matrix.py  汇总矩阵结果
 ├── probe_core.sh        core 文件结构检查（readelf notes/segments）
 └── recon_console.sh     重采 console 日志（无 gdb 运行）
@@ -45,13 +46,14 @@ sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf \
 # 1. 编译三方库（SQLite amalgamation + LMDB，见脚本内下载说明）
 ./tools/build_third.sh
 
-# 2. 生成全部 73 个案例源码
+# 2. 生成全部 78 个案例源码
 bash tools/make_cases.sh && bash tools/make_cases2.sh && \
 bash tools/make_cases_conc.sh && bash tools/make_cases_db.sh && \
 bash tools/make_case21.sh && bash tools/make_cases3.sh && \
+bash tools/make_cases6.sh && \
 bash tools/make_cases4.sh && bash tools/make_cases5.sh
 
-# 3. 生成 219 格 core（约 30 分钟，自动含保真处理）
+# 3. 生成 234 格 core（约 30 分钟，自动含保真处理）
 bash tools/gen_matrix.sh
 
 # 4. 构建符号表目录
@@ -68,7 +70,7 @@ python3 tools/viz_check.py
 python3 tools/viz_gallery.py &
 ```
 
-## 新增 40 维度（#34~#73）
+## 新增 45 维度（#34~#78）
 
 ### 批次 1：传统 C 语言经典（21 个）
 realloc 悬垂/返回栈地址/非堆 free/未初始化栈指针/差一越界/
@@ -84,6 +86,12 @@ union 混用/符号转换/只读段写/字节序错读/定时器 UAF/atexit UAF/
 IPMI crafted 报文/FRU 损坏/sensor 热插拔/I2C 超时旧缓存/
 D-Bus 属性 UAF/电源切换上下文/SEL 写满/shm 对象移除后访问/FIFO SIGPIPE
 
+### 批次 4：消息队列（5 个）
+POSIX mq 消费者线程 UAF（qemu 未实现 mq_notify，通知语义以阻塞消费者
+实现）/接收缓冲过小 EMSGSIZE 未检查（残留旧消息野偏移）/消息长度字段
+未校验反序列化越界/SysV 队列被 IPC_RMID 后返回值当长度用/自研环形队列
+满判断缺失越界写
+
 ## qemu-user 环境适配（生成层，不影响真机语义）
 
 | 适配 | 原因 | 方案 |
@@ -92,6 +100,7 @@ D-Bus 属性 UAF/电源切换上下文/SEL 写满/shm 对象移除后访问/FIFO
 | shm 对象移除用 rename | unlink 后孤儿 inode 截断区的 gcore 读取会击杀仿真器 | 生成环境 rename 移除对象名（真机仍走 unlink） |
 | fd 配额 4 | gdb 对宿主 fd 数敏感（>128 崩溃） | 打开配额在软件层模拟 EMFILE |
 | 整数除零不陷阱 | arm64/riscv 整数除法返回 0 无异常 | 换算层检测除零后 raise(SIGFPE)（固件规约） |
+| mq_notify 不可用 | qemu-user 8.2 未实现 mq_notify 翻译（ENOSYS） | 消息通知语义以阻塞消费者线程实现（mq_consumer_uaf） |
 
 ## 保真处理说明
 
