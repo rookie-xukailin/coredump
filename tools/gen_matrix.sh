@@ -53,6 +53,49 @@ sqlite_finalize_uaf|sqlite_finalize_uaf.c|11|1|none|bare|sqlite|-pthread|1
 lmdb_close_race|lmdb_close_race.c|11|1|none|gz|lmdb|-pthread|1
 lmdb_truncate_bus|lmdb_truncate_bus.c|7|2|none|tar|lmdb||1
 dlclose_race|dlclose_race.c|11|1|log|bare|@dlplug|-pthread|1
+# ---- 批次 1：传统 C 语言经典（#34~#54）----
+realloc_dangling|realloc_dangling.c|11|1|log|gz|||
+stack_local_return|stack_local_return.c|11|1|pc|bare|||
+free_nonheap|free_nonheap.c|6|-6|0|bare|||1
+uninit_stack_ptr|uninit_stack_ptr.c|11|1|log|gz|||
+off_by_one|off_by_one.c|11|2|log|bare|||
+int_overflow_alloc|int_overflow_alloc.c|11|1|log|gz|||
+sprintf_overflow|sprintf_overflow.c|6|-6|0|bare|||1
+strlen_noterm|strlen_noterm.c|11|1|log|gz|||
+sizeof_pointer|sizeof_pointer.c|11|1|log|tar|||1
+union_confusion|union_confusion.c|11|1|log|bare|||
+signed_unsigned|signed_unsigned.c|11|1|log|gz|||
+const_rodata_write|const_rodata_write.c|11|2|log|bare|||1
+endianness_cast|endianness_cast.c|11|1|log|gz|||
+timer_after_free|timer_after_free.c|11|1|log|bare|||1
+atexit_stale|atexit_stale.c|11|1|log|gz|||
+shutdown_order|shutdown_order.c|11|1|log|tar||-pthread|
+fd_exhaust|fd_exhaust.c|11|1|log|gz|||
+malloc_null|malloc_null.c|11|1|log|bare|||
+sigpipe_write|sigpipe_write.c|13|0|sigpipe|bare|||1
+fpe_divzero|fpe_divzero.c|8|1|0|bare|||1
+nest_signal|nest_signal.c|11|1|log|gz|||
+# ---- 批次 2：硬件/平台/嵌入式特定（#55~#64）----
+no_volatile_hw|no_volatile_hw.c|11|1|log|gz|||
+unaligned_arm|unaligned_arm.c|7|1|log|bare|||1
+dma_alignment|dma_alignment.c|7|1|log|gz|||
+eeprom_corrupt|eeprom_corrupt.c|11|1|log|tar|||1
+config_array_size|config_array_size.c|11|1|log|gz|||
+argv_missing|argv_missing.c|11|1|log|bare|||
+init_order|init_order.c|11|1|log|gz|||
+watchdog_stuck|watchdog_stuck.c|6|-6|0|tar||-pthread|1
+thread_hang_kill|thread_hang_kill.c|6|-6|0|bare||-pthread|1
+lock_deadlock_kill|lock_deadlock_kill.c|6|-6|0|gz||-pthread|1
+# ---- 批次 3：BMC/OpenBMC 特定（#65~#73）----
+ipmi_parse_overflow|ipmi_parse_overflow.c|11|1|log|gz|||
+fru_corrupt_parse|fru_corrupt_parse.c|11|1|log|bare|||
+sensor_hotplug|sensor_hotplug.c|11|1|log|gz|||
+i2c_timeout_stale|i2c_timeout.c|11|1|log|tar|||1
+dbus_prop_crash|dbus_prop_crash.c|11|1|log|gz|||
+power_transition|power_transition.c|11|1|log|bare|||
+sel_full_error|sel_full_error.c|11|1|log|gz|||
+shm_unlink_alive|shm_unlink_alive.c|7|2|log|tar|||1
+fifo_sigpipe|fifo_sigpipe.c|13|0|sigpipe|gz|||1
 "
 
 ARCHS="arm64 arm32 riscv64"
@@ -115,17 +158,24 @@ gen_cell() {  # gen_cell <case-line> <arch>
     local PORT
     local ATTEMPT
     rm -f /tmp/bmc_*.flag /tmp/bmc_*.bin    # fork 类案例的进程间同步文件
+    rm -f $CORES/${NAME}_${ARCH}.core $CORES/${NAME}_${ARCH}.core.gz \
+          $CORES/1_core-*-${NAME}_${ARCH}-*.tar.gz   # 清掉旧格, 防止重生成后分析取旧核
     for ATTEMPT in 1 2; do
         PORT=$((21000 + RANDOM % 20000))
-        ( export LD_LIBRARY_PATH=$BUILD ; ${QEMU[$ARCH]} -L ${SYSROOT[$ARCH]} -g $PORT $BIN ) 2>$LOGS/matrix/$TAG.console.log &
+        ( export LD_LIBRARY_PATH=$BUILD BMC_QEMU_EPIPE_PROBE=1 ; ${QEMU[$ARCH]} -L ${SYSROOT[$ARCH]} -g $PORT $BIN ) 2>$LOGS/matrix/$TAG.console.log &
         local QPID=$!
         sleep 2
         gdb-multiarch -batch -nx \
           -ex "set pagination off" -ex "set sysroot ${SYSROOT[$ARCH]}" \
-          -ex "file $BIN" -ex "target remote :$PORT" -ex "continue" \
+          -ex "file $BIN" -ex "target remote :$PORT" \
+          -ex "handle SIGPIPE stop nopass" \
+          -ex "handle SIG34 nostop noprint pass" \
+          -ex "break ipc_sigpipe_default" \
+          -ex "continue" \
+          -ex "gcore $CORES/${NAME}_${ARCH}.core" \
           -ex "echo \n===REGS===\n" -ex "info registers pc sp" \
           -ex "echo \n===BT===\n" -ex "thread apply all bt 30" \
-          -ex "gcore $CORES/${NAME}_${ARCH}.core" > $LOGS/matrix/$TAG.gdb.log 2>&1
+          > $LOGS/matrix/$TAG.gdb.log 2>&1
         kill $QPID 2>/dev/null; wait $QPID 2>/dev/null
         [ -s $CORES/${NAME}_${ARCH}.core ] && break
         echo "[$TAG] gcore attempt $ATTEMPT failed, retry..."
@@ -175,7 +225,13 @@ gen_cell() {  # gen_cell <case-line> <arch>
 
     # addrsrc=none：崩溃在第三方库内部、真实出错地址不可知（qemu 不传 siginfo），
     # 不注入 NT_SIGINFO —— 工具按"无 siginfo"路径如实报告信号
-    if [ "$ADDRSRC" != "none" ]; then
+    # addrsrc=sigpipe：qemu stub 不回停 SIGPIPE——在 ipc_sigpipe_default
+    # 断点取核后注入 NT_SIGINFO(13) 并修补 pr_cursig，还原信号现场
+    if [ "$ADDRSRC" = "sigpipe" ]; then
+        SIGNO=13; CODE=0
+        python3 /mnt/d/AI_Workspace/Coredump/work/inject_siginfo.py \
+            $CORES/${NAME}_${ARCH}.core 13 0 0 13 >/dev/null
+    elif [ "$ADDRSRC" != "none" ]; then
         python3 /mnt/d/AI_Workspace/Coredump/work/inject_siginfo.py $CORES/${NAME}_${ARCH}.core $SIGNO $CODE "${ADDR:-0}" >/dev/null
     fi
 

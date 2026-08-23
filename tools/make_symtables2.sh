@@ -6,17 +6,8 @@ B=$W/build
 ST=$W/symtab
 rm -rf $ST && mkdir -p $ST
 
-# 主程序
-for f in $B/null_write_* $B/wild_mmio_* $B/stack_overflow_* $B/heap_overflow_* \
-         $B/double_free_* $B/uaf_write_* $B/oob_read_* $B/bad_funcptr_* \
-         $B/stack_smash_* $B/assert_fail_* $B/thread_crash_* $B/shlib_crash_* \
-         $B/ill_jump_* $B/null_poison_* $B/uaf_reuse_* $B/deep_chain_* \
-         $B/hugespan_* $B/dlopen_crash_* $B/handler_crash_* $B/blame_thread_* \
-         $B/stomped_late_* $B/db_reload_race_* $B/rec_delete_race_* \
-         $B/shm_truncate_bus_* $B/db_index_corrupt_* $B/dblfree_concurrent_* \
-         $B/db_compact_race_* $B/sqlite_close_race_* $B/sqlite_corrupt_bus_* \
-         $B/sqlite_finalize_uaf_* $B/lmdb_close_race_* $B/lmdb_truncate_bus_* \
-         $B/dlclose_race_*; do
+# 主程序（全部案例三架构产物：33 旧维度 + 40 新维度）
+for f in $B/*_arm64 $B/*_arm32 $B/*_riscv64; do
     [ -f "$f" ] && cp "$f" "$ST/" && echo "  $(basename $f)"
 done
 

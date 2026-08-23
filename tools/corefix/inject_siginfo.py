@@ -8,14 +8,30 @@
   64位 desc: si_signo(i32) si_errno(i32) si_code(i32) pad(4) si_addr(u64@16)
   32位 desc: si_signo(i32) si_errno(i32) si_code(i32) si_addr(u32@12)
 
-用法: inject_siginfo.py <core> <signo> <code> <addr-hex>
+用法: inject_siginfo.py <core> <signo> <code> <addr-hex> [cursig]
+  cursig: 可选——同时把第一个 NT_PRSTATUS 的 pr_cursig 修补为该值。
+  用于"断点取核"的信号类维度（如 SIGPIPE：qemu stub 不回停，只能在
+  raise 调用点断点取核后补 NT_SIGINFO + pr_cursig 还原信号现场）。
 """
 import os
 import struct
 import sys
 
 NT_SIGINFO = 0x53494749
+NT_PRSTATUS = 1
 PT_NOTE = 4
+
+
+def first_prstatus_desc_off(data, note_fileoff):
+    """返回第一个 NT_PRSTATUS desc 的文件偏移（找不到返回 None）。"""
+    off = note_fileoff
+    while off + 12 <= len(data):
+        namesz, descsz, ntype = struct.unpack_from("<III", data, off)
+        name = data[off + 12: off + 12 + namesz]
+        if ntype == NT_PRSTATUS and name.startswith(b"CORE"):
+            return off + 12 + ((namesz + 3) & ~3)
+        off = off + 12 + ((namesz + 3) & ~3) + ((descsz + 3) & ~3)
+    return None
 
 
 def main():
@@ -96,6 +112,21 @@ def main():
     from corepatch import insert_bytes
     new = insert_bytes(data, insert_pos, entry, elfclass=ei_class,
                        little=(data[5] == 1))
+
+    # 可选：修补第一个 NT_PRSTATUS 的 pr_cursig（断点取核场景）
+    if len(sys.argv) > 5:
+        cursig = int(sys.argv[5])
+        pr_off = first_prstatus_desc_off(data, note_fileoff)
+        if pr_off is not None:
+            if pr_off >= insert_pos:
+                pr_off += len(entry)
+            new = bytearray(new)
+            struct.pack_into(endian + "h", new, pr_off + 12, cursig)
+            new = bytes(new)
+            print("pr_cursig patched to %d @0x%x" % (cursig, pr_off))
+        else:
+            print("WARN: no NT_PRSTATUS found for cursig patch")
+
     with open(path, "wb") as f:
         f.write(new)
     # PT_NOTE filesz 以 .shstrtab 起点为界（其后是字符串表/节头表，不属于 note 段）
