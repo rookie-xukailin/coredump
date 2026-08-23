@@ -122,4 +122,9 @@ EXPECT_ARCH = {
         ev="db_far_record_read", degrade=True),
     ("lmdb_truncate_bus", "arm64"): None,   # qemu internal SIGBUS，无法 gcore
     ("lmdb_truncate_bus", "arm32"): None,   # O1 下 qemu SIGBUS 交付不稳（同 arm64 类）
+    # arm32 被杀线程的应用帧符号化退化（exidx 展开失败, gdb bt 全 ??），
+    # 栈扫描给出文件级证据 lock_deadlock_kill.c:22（net_cfg_apply 体内）
+    ("lock_deadlock_kill", "arm32"): dict(
+        dim="两线程锁序交叉死锁被看门狗杀(arm32帧符号化退化)",
+        kw="SIGABRT|abort", ev="lock_deadlock_kill.c:", degrade=True),
 }
