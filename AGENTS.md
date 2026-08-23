@@ -59,6 +59,10 @@ python tests/run_all.py          # 系统套件将进程内驱动完整分析流
 - **编译基线 `-g -O1`（真实固件级别，不加帧指针）**：案例源码经抗优化处理
   （volatile 汇/noinline 定帧），杜绝 -O1 的死存储消除/常量折叠/尾调用把
   缺陷机制"合法拆弹"；早期 -O0 产物归档于工作目录 cores_O0/ 供对照。
+- **离线能力是发布承诺**：`--offline` 必须保持"零外部程序调用"（99 格
+  系统矩阵已按 --offline 全量验证 97/0/2）；任何改动不得让离线模式新依赖
+  gdb/addr2line 等外部工具；行号解析走 `bmccore/linetab.py`（纯 Python
+  读 DWARF）。抽样防回退见 `test_system_matrix_offline`。
 
 ## 4. 已知环境限制（如实记录，不许静默绕过）
 

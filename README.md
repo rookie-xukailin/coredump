@@ -159,6 +159,48 @@ python3 bmccore.py analyze <core> --keep-temp
 - **Python 3.8+**（基线 3.8，已在 3.8.18 / 3.12.3 / 3.13.5 实测（单测+CLI 全功能）；vendored pyelftools 固定 0.31.x，tests/test_py38_compat.py 静态防回退）
 - 交叉 gdb / addr2line（可选；缺失时对应技能自动降级，栈扫描等纯 Python 能力不受影响）
 
+## 完全离线使用（编译服务器无网络）
+
+**本工具天然离线可用**：零 pip 依赖（pyelftools 已 vendored 在仓库内）、
+零 apt 依赖（不需要安装 gdb/addr2line）。把整个仓库目录拷到编译服务器
+即可，例如打包传输：
+
+```bash
+# 有网机器上打包（或直接 git archive / 复制目录）
+tar czf bmccore-offline.tar.gz --exclude=.git -C ~ bmccore
+# U盘/scp 送到编译服务器后解压，配置同"傻瓜式指南 场景A"，然后：
+python3 bmccore.py analyze 1_core-...tar.gz --offline
+```
+
+`--offline` = 纯 Python 模式，**保证不调用任何外部程序**（无网/无工具链
+环境的最稳形态）：
+
+| 能力 | 离线（--offline） | 在线（默认，有交叉 gdb） |
+|---|---|---|
+| 符号配对（build-id）/栈扫描(call 指令级验证)/DWARF 行号/堆取证/受害对象探测/信号归因/源码联动/console 归因 | ✅ 纯 Python | ✅ |
+| gdb 精确回溯 | 自动跳过（栈扫描兜底给出调用链） | ✅ |
+
+99 格系统测试（33 维度×3 架构）已按 --offline 全量验证（见
+`tests/test_system_matrix.py` 的 `test_system_matrix_offline` 抽样防回退）。
+不加 `--offline` 时，若机器上恰好有 gdb 也会自动用上、没有则同样降级。
+
+## 关于符号表（不需要单独指定）
+
+**不需要手工指定任何符号表文件。** 符号来源就是 `artifact_dir` 里的
+**未 strip 编译产物**（ELF 文件本身，symtab/DWARF 都在里面）：
+
+1. 工具从 core 的内存映像还原每个已加载模块（主程序 + 每个 so）的
+   **build-id**，与产物目录里的产物按 build-id **自动精确配对**——版本
+   不符会明确报 mismatch，绝不静默用错符号；
+2. 函数名来自产物 symtab，行号来自产物 DWARF（`.debug_line`）；
+   因此要求固件编译时保留符号：**不要 strip**，且行号需要 `-g`
+   （仅 `-O1` 不加 `-g` 时函数名仍可用，行号缺失会如实标注）；
+3. 配不上时的逃生门：`--exe /路径/主程序`、`--module libfoo.so=/路径`
+   （可多次），或把对应固件版本的完整产物补进 `artifact_dir`。
+
+注意：单独的 `.debug` 分离文件 / debuginfod 暂不支持——请保证
+`artifact_dir` 里是未 strip 的完整 ELF。
+
 ## 测试
 
 ```bash
