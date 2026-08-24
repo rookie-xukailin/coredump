@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """bmc-core —— BMC coredump 离线分析工具
 
-用法（编译服务器上，配好 bmccore.toml 后）:
-    python3 bmccore.py info  1_core-2078599821-remotexdp-6759.tar.gz
-    python3 bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
+用法（编译服务器上，配好 bmccore.toml 后；python3 版本不一时显式用 python3.8）:
+    python3.8 bmccore.py info  1_core-2078599821-remotexdp-6759.tar.gz
+    python3.8 bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
 """
 import argparse
 import os
@@ -35,7 +35,10 @@ def _fmt_size(n):
 
 
 def cmd_info(args):
-    res = intake(args.core, keep_temp=args.keep_temp)
+    workdir = getattr(args, "workdir", None)
+    if workdir:
+        os.makedirs(workdir, exist_ok=True)
+    res = intake(args.core, keep_temp=args.keep_temp, workroot=workdir)
     try:
         from bmccore.corefile import CoreFile
         from bmccore.modules import group_modules
@@ -90,7 +93,10 @@ def cmd_analyze(args):
             print(msg, file=sys.stderr)
 
     cfg = _load_config(args)
-    res = intake(args.core, keep_temp=True)
+    workdir = getattr(args, "workdir", None)
+    if workdir:
+        os.makedirs(workdir, exist_ok=True)
+    res = intake(args.core, keep_temp=True, workroot=workdir)
     try:
         pipe = Pipeline(res.core_path, cfg, log=log)
         results = pipe.run()
@@ -131,6 +137,9 @@ def main(argv=None):
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", help="bmccore.toml 路径（默认向上查找）")
+    common.add_argument("--workdir", metavar="PATH",
+                        help="解包/中间文件目录（tar.gz 等压缩包解到该目录下，"
+                             "不存在则创建；默认系统临时目录）")
 
     p_info = sub.add_parser("info", parents=[common], help="快速摘要：架构/信号/线程/模块")
     p_info.add_argument("core", help="core 文件或 tar.gz 包")

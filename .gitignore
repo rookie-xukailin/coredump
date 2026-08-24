@@ -7,3 +7,4 @@ bmccore_report/
 .pytest_cache/
 .zcode/
 dist/
+swrd-skill-coredump-analyze/workspace/

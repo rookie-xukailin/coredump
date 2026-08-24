@@ -13,12 +13,13 @@ version: 3.1.0
 ```
 <技能根目录>/
 ├── SKILL.md               ← 本文件（入口）
-├── bmccore.py             ← 引擎 CLI 入口（python3 直接调用）
+├── bmccore.py             ← 引擎 CLI 入口（python3.8 直接调用）
 ├── bmccore/               ← 引擎包（解析/回溯/堆取证/结论）
 ├── open/pyelftools        ← 内置依赖（无需 pip 安装）
 ├── scripts/
 │   └── coredump_analyze.py  ← 报告 JSON → 结构化数据 的辅助脚本
-└── bmccore.toml.example   ← 配置模板
+├── bmccore.toml.example   ← 配置模板
+└── workspace/             ← 运行时工作区（解包/中间产物/报告，自动创建，可随时清理）
 ```
 
 **定位技能根目录**：加载技能时系统会告知本 SKILL.md 的路径（base directory），
@@ -26,6 +27,8 @@ version: 3.1.0
 若不存在，说明技能包不完整，请用户重新获取完整包（不要猜测其他路径）。
 
 环境要求：Python 3.8+（纯标准库 + 内置依赖，零 pip 安装，适配内网/离线环境）。
+**命令统一用 `python3.8` 调用**——部分机器默认 `python3` 版本不一；
+仅当机器没有 `python3.8` 可执行文件且默认 `python3` 已是 3.8+ 时才用 `python3`。
 
 注：源码仓库中的开发资产（tests/、tools/、docs/、README 等）位于本技能
 目录之外，不随技能分发；技能包内即上述自包含结构。
@@ -82,14 +85,18 @@ version: 3.1.0
 # 引擎随技能包自带：<技能根目录> 即本 SKILL.md 所在目录
 BMCORE="<技能根目录>/bmccore.py"
 
+# 工作区：解包/中间产物/报告统一放技能目录下的 workspace/（自动创建）
+WS="<技能根目录>/workspace"
+
 # 全量分析（--offline：纯 Python 模式，不依赖 gdb/addr2line 等任何外部程序，
 # 符号配对/CFI回溯/栈扫描/行号/堆取证全可用——内网/无交叉工具链环境默认用它）
-python3 "$BMCORE" analyze <core文件> \
+python3.8 "$BMCORE" analyze <core文件> \
     --symbol-table <符号表目录> \
     --source-root <源码树> \
     [--console-log <串口日志>] \
     --offline \
-    -o /tmp/bmccore_out
+    --workdir "$WS/intake" \
+    -o "$WS/report"
 
 # 若机器上装有交叉 gdb（aarch64-linux-gnu-gdb / gdb-multiarch），
 # 去掉 --offline 可额外获得 gdb 精确回溯（工具链自动探测）
@@ -107,11 +114,11 @@ python3 "$BMCORE" analyze <core文件> \
 读 JSON 报告，提取关键数据：
 
 ```bash
-# 辅助脚本同样随技能包自带
-python3 <技能根目录>/scripts/coredump_analyze.py /tmp/bmccore_out/*_report.json
+# 辅助脚本同样随技能包自带（报告在 workspace/report/ 下）
+python3.8 <技能根目录>/scripts/coredump_analyze.py "<技能根目录>/workspace/report/"*_report.json
 
 # 或者直接读 JSON
-cat /tmp/bmccore_out/*_report.json
+cat "<技能根目录>/workspace/report/"*_report.json
 ```
 
 **你需要关注的字段**：

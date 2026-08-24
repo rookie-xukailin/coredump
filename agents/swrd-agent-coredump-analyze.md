@@ -40,13 +40,21 @@ SKILL.md 的完整方法论（可直接 read_file，或经 use_skill 加载；�
 
 ### 1. 跑引擎拿结构化数据
 
+解释器统一用 `python3.8`（部分机器默认 python3 版本不一；仅当无
+python3.8 可执行文件且默认 python3 已 ≥3.8 时才用 python3）。
+解包/中间产物/报告统一放技能目录下的 workspace/（自动创建）：
+
 ```bash
-python3 <技能根目录>/bmccore.py analyze <core文件> \
+BMCORE="<技能根目录>/bmccore.py"
+WS="<技能根目录>/workspace"
+
+python3.8 "$BMCORE" analyze <core文件> \
     --symbol-table <符号表目录> \
     --source-root <源码树> \
     [--console-log <串口日志>] \
     --offline \
-    -o /tmp/bmccore_out
+    --workdir "$WS/intake" \
+    -o "$WS/report"
 ```
 
 `--offline` 纯 Python 模式（零外部程序调用、零网络请求，适配内网）；
@@ -56,7 +64,7 @@ python3 <技能根目录>/bmccore.py analyze <core文件> \
 ### 2. 解析输出
 
 ```bash
-python3 <技能根目录>/scripts/coredump_analyze.py /tmp/bmccore_out/*_report.json
+python3.8 <技能根目录>/scripts/coredump_analyze.py "$WS"/report/*_report.json
 ```
 
 重点字段：`定位结论.conclusions`（分析起点）、`回溯.frames`（file:line，

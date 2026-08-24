@@ -39,7 +39,9 @@ INSTALL_MD = """# swrd-skill-coredump-analyze 技能安装说明
 
 安装后验证（在技能目录内执行，应正常打印用法/版本信息）：
 
-    python3 bmccore.py --help
+    python3.8 bmccore.py --help
+
+（无 python3.8 可执行文件且默认 python3 已 ≥3.8 时，可用 python3 替代）
 
 ## 配套子代理 swrd-agent-coredump-analyze（可选，推荐）
 
@@ -59,7 +61,10 @@ INSTALL_MD = """# swrd-skill-coredump-analyze 技能安装说明
 "进程崩了/段错误/abort/内存被踩" 等关键词，技能自动加载、子代理被委派。
 
 内网提示：
+- 命令统一用 `python3.8`（部分机器默认 python3 版本不一；无 python3.8
+  且 python3 ≥3.8 时可用 python3）；
 - 分析默认走 `--offline`（纯 Python，零外部程序调用、零网络请求）；
+- 解包/中间产物/报告统一落在技能目录下 `workspace/`（自动创建，可随时清理）；
 - 请勿设置 `DEBUGINFOD_URLS` 环境变量或 bmccore.toml 的 `debuginfod_url`
   （默认关闭；配置后才会按 build-id 发起 HTTP 拉取符号）；
 - 根因分析需要内网可达的符号表目录与源码树，仅有 core 文件时
@@ -88,7 +93,8 @@ def main():
 
     # 技能包整体复制（剔除 __pycache__ / 字节码）
     shutil.copytree(SRC, pkg_dir,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
+                                                  "workspace"))
 
     # 附加：用户手册 + 配套子代理 + 安装说明
     doc_dst = os.path.join(pkg_dir, "docs")
