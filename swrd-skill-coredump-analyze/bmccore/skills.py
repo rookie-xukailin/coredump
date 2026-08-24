@@ -4,6 +4,7 @@
 每个技能独立、可单独失败（失败记入报告的"技能状态"节，不影响其他技能）。
 """
 import os
+import time
 
 from . import console as console_mod
 from . import heap as heap_mod
@@ -119,14 +120,25 @@ class Pipeline(object):
             else:
                 # 离线（无 addr2line）：纯 Python 直读 DWARF 行号表
                 from . import linetab
+                _linetab_seen = set()
 
                 def a2l(path, addrs, base):
+                    if path not in _linetab_seen:
+                        _linetab_seen.add(path)
+                        self.log("[行号] 首次解析 %s 行号表（大库需数秒，仅此一次）..."
+                                 % os.path.basename(path))
                     table = linetab.resolve(path, [a - base for a in addrs])
                     return {k: ("", v) for k, v in table.items()}
+            self.log("[栈扫描] 共 %d 个线程待扫（含行号解析）" % len(threads))
             for t in threads:
+                self.log("[栈扫描] tid=%d 开始 ..." % t.tid)
+                _t0 = time.time()
                 scan_results[t.tid] = scan_mod.scan_thread(
                     core, core.arch, t, matches, resolver,
                     max_depth=cfg.max_scan_depth, addr2line=a2l)
+                self.log("[栈扫描] tid=%d 完成，%d 个候选帧（耗时 %.1fs）"
+                         % (t.tid, len(scan_results[t.tid].frames),
+                            time.time() - _t0))
             n_conf = sum(len(r.confirmed) for r in scan_results.values())
             self._mark("scan", "ok", "%d 个确认帧" % n_conf)
 
@@ -143,9 +155,12 @@ class Pipeline(object):
                     if k in skip:
                         continue
                     reg_ptrs.append(v)
+            self.log("[堆取证] 走查堆区 ...")
+            _t0 = time.time()
             heap_result = heap_mod.run_heap_skill(core, core.threads, matches,
                                                   victim_addr=victim,
                                                   reg_ptrs=reg_ptrs)
+            self.log("[堆取证] 完成（耗时 %.1fs）" % (time.time() - _t0))
             self._mark("heap", "ok" if heap_result.has_heap else "skipped",
                        "" if heap_result.has_heap else "core 中无堆数据")
 
@@ -210,9 +225,13 @@ class Pipeline(object):
             exe_artifact = exe_match.artifact if exe_match else None
             if exe_artifact:
                 arch_name = core.arch.name if core.arch else "x86_64"
+                self.log("[CFI] .eh_frame 展开崩溃线程 ...")
+                _t0 = time.time()
                 cfi_frames = cfi_unwind(core, core.crash_thread,
                                         arch_name, exe_artifact.path,
                                         cfg.max_frames)
+                self.log("[CFI] 完成，%d 帧（耗时 %.1fs）"
+                         % (len(cfi_frames or []), time.time() - _t0))
             if cfi_frames:
                 self._mark("cfi", "ok", "%d 帧（.eh_frame 精确展开）" % len(cfi_frames))
             else:
@@ -221,6 +240,7 @@ class Pipeline(object):
         # ---- 9. 线程锁关联分析 ----
         lock_result = None
         if "locks" in want and len(core.threads) > 1:
+            self.log("[锁分析] %d 个线程 ..." % len(core.threads))
             lock_result = lockmon_mod.analyze_locks(core, core.threads)
             if lock_result.has_deadlock:
                 self._mark("locks", "ok", "⚠ 检测到死锁！")
