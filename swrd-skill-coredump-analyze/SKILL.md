@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.6.0
+version: 3.7.0
 ---
 
 # Coredump 智能分析
@@ -101,8 +101,8 @@ offline      = false   # 无交叉工具链设 true（纯Python零外部依赖�
 
 # 有交叉工具链时配上（原生 addr2line 比纯 Python 建行号表快一个量级）：
 # [toolchain.riscv64]
-# gdb = "/opt/xxx/bin/riscv64-unknown-linux-gnu-gdb"
-# addr2line = "/opt/xxx/bin/riscv64-unknown-linux-gnu-addr2line"
+# path = "/opt/xxx/riscv-toolchain"    # 只给一个路径（根目录或 bin 目录），
+#                                      # 其下 riscv64-*-gdb 等自动发现配对
 ```
 
 **日常分析就一条短命令**（配置收拢全部参数；CLI 参数仍可临时覆盖配置）：

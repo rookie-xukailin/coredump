@@ -20,6 +20,40 @@ _ARCH_PREFIXES = {
 
 _TOOLS = ("gdb", "addr2line", "objdump")
 
+# 架构 -> 工具文件名里必须包含的 triple 关键字（用于目录扫描时配对）
+_ARCH_KEYS = {
+    "arm32": ("arm",),
+    "arm64": ("aarch64",),
+    "riscv64": ("riscv64",),
+    "riscv32": ("riscv32", "riscv64"),
+}
+
+
+def _probe_tool_dir(d, arch_name):
+    """在目录 d 里找架构匹配的交叉工具，返回 {tool: 绝对路径}（只含找到的）。
+
+    匹配规则：优先 triple 前缀名（如 riscv64-unknown-linux-gnu-gdb，
+    要求文件名含架构关键字且以 -<tool> 结尾）；没有前缀名时接受目录内
+    裸名（gdb 优先 multiarch 变体）。
+    """
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return {}
+    keys = _ARCH_KEYS.get(arch_name, (arch_name,))
+    tools = {}
+    for t in _TOOLS:
+        cands = sorted(n for n in names
+                       if n.endswith("-%s" % t) and any(k in n for k in keys))
+        if cands:
+            tools[t] = os.path.join(d, cands[0])
+            continue
+        for bare in (("gdb-multiarch", "gdb") if t == "gdb" else (t,)):
+            if bare in names:
+                tools[t] = os.path.join(d, bare)
+                break
+    return tools
+
 
 class Toolchain(object):
     def __init__(self, arch_name, tools, source):
@@ -63,6 +97,25 @@ def discover(arch_name, config=None):
             w = _which(p)          # 允许直接写命令名（如 gdb = "gdb-multiarch"）
             if w:
                 tools[t] = w
+    # path：只给一个路径（工具链根目录 / bin 目录 / 以 - 结尾的完整前缀），
+    # 其下工具自动发现。优先级低于逐工具显式指定。
+    p_path = tc_cfg.get("path") if tc_cfg else None
+    if p_path and not offline:
+        p_path = os.path.expanduser(str(p_path))
+        if os.path.isdir(p_path):
+            found = _probe_tool_dir(p_path, arch_name)
+            if not any(found.values()):
+                found = _probe_tool_dir(os.path.join(p_path, "bin"), arch_name)
+            for t, p in found.items():
+                tools[t] = tools[t] or p
+            if any(found.values()):
+                notes.append("路径 %s 自动发现" % p_path)
+        elif p_path.endswith("-"):
+            for t in _TOOLS:
+                cand = p_path + t
+                if not tools[t] and os.path.isfile(cand):
+                    tools[t] = cand
+                    notes.append("前缀路径 %s 自动发现" % p_path)
     if tc_cfg.get("prefix") and not offline:
         pfx = tc_cfg["prefix"]
         if pfx.endswith("-"):        # 配置里常见带尾横线的 triple 前缀

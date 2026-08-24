@@ -12,17 +12,18 @@ output       = ""     # 报告输出目录（建议填 <技能根目录>/workspa
 format       = "both" # md / json / both
 offline      = false  # 无交叉工具链改 true（纯 Python 零外部依赖）；配了下方工具链保持 false
 
-# ---- 交叉工具链（有则解注释填写；原生 addr2line/gdb 比纯 Python 快且多精确回溯）----
+# ---- 交叉工具链（推荐：只给一个路径，gdb/addr2line/objdump 在其下自动发现）----
 # [toolchain.riscv64]
-# gdb       = "/opt/xxx/bin/riscv64-unknown-linux-gnu-gdb"
-# addr2line = "/opt/xxx/bin/riscv64-unknown-linux-gnu-addr2line"
-# objdump   = "/opt/xxx/bin/riscv64-unknown-linux-gnu-objdump"
+# path = "/opt/xxx/riscv-toolchain"                     # 工具链根目录或 bin 目录均可，
+#                                                       # 其下 riscv64-*-gdb 等自动配对
+# 或给以 - 结尾的完整前缀：path = "/opt/xxx/bin/riscv64-unknown-linux-gnu-"
+# 也可逐个显式指定（最高优先）：gdb = "..." / addr2line = "..." / objdump = "..."
 
 # [toolchain.arm64]
-# prefix = "aarch64-linux-gnu-"        # 前缀方式（需工具链 bin 在 PATH 里）
+# path = "/opt/xxx/aarch64-toolchain"
 
 # [toolchain.arm32]
-# prefix = "arm-linux-gnueabihf-"
+# path = "/opt/xxx/arm-toolchain"
 
 # ---- 手动指定某模块符号表（自动配对失败时的逃生门）----
 # [module]

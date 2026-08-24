@@ -153,6 +153,45 @@ def test_shipped_workspace_template():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_toolchain_path_discovery():
+    """[toolchain.<arch>] path= 单路径：目录下 triple 前缀工具自动发现。"""
+    import tempfile
+    from bmccore.toolchain import discover
+    tmp = tempfile.mkdtemp()
+    try:
+        bindir = os.path.join(tmp, "bin")
+        os.makedirs(bindir)
+        for t in ("gdb", "addr2line", "objdump"):
+            io.open(os.path.join(bindir, "riscv64-unknown-linux-gnu-%s" % t),
+                    "w").close()
+        # 干扰项：别的前缀 + 裸名，不应被选中
+        io.open(os.path.join(bindir, "aarch64-linux-gnu-gdb"), "w").close()
+        io.open(os.path.join(bindir, "addr2line"), "w").close()
+
+        class _Cfg(object):
+            offline = False
+            toolchain = {"riscv64": {"path": tmp}}       # 根目录（工具在 bin/ 下）
+
+        tc = discover("riscv64", _Cfg())
+        assert tc.has("gdb") and tc.has("addr2line") and tc.has("objdump")
+        assert "riscv64-unknown-linux-gnu-gdb" in tc.tools["gdb"]
+        assert "aarch64" not in tc.tools["gdb"]
+
+        _Cfg.toolchain = {"riscv64": {"path": bindir}}   # 直接给 bin 目录
+        tc2 = discover("riscv64", _Cfg())
+        assert tc2.has("gdb") and "riscv64-unknown-linux-gnu-addr2line" in \
+            tc2.tools["addr2line"]
+
+        _Cfg.toolchain = {"riscv64": {
+            "path": os.path.join(bindir, "riscv64-unknown-linux-gnu-")}}
+        tc3 = discover("riscv64", _Cfg())                 # 以 - 结尾的完整前缀
+        assert tc3.has("gdb") and tc3.tools["gdb"].endswith(
+            "riscv64-unknown-linux-gnu-gdb")
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

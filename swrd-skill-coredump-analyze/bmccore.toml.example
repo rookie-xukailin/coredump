@@ -25,18 +25,17 @@ sysroot = "/home/bmc/build/rootfs"
 # output = "/home/bmc/reports"
 # format = "both"    # md / json / both
 
-# ---- 工具链（不配则按架构自动探测 PATH）----
+# ---- 工具链（推荐 path 单路径方式：根目录或 bin 目录，其下 <triple>-gdb 等自动发现）----
 # [toolchain.arm64]
-# prefix = "aarch64-linux-gnu-"
-# gdb = "/opt/toolchain/bin/aarch64-linux-gnu-gdb"      # 二选一：直接指定路径
-# addr2line = "/opt/toolchain/bin/aarch64-linux-gnu-addr2line"
-# objdump = "/opt/toolchain/bin/aarch64-linux-gnu-objdump"
+# path = "/opt/toolchain/aarch64"
+# 也可逐个显式指定（最高优先）：gdb = "/opt/toolchain/bin/aarch64-linux-gnu-gdb"
+# 或 PATH 前缀方式：prefix = "aarch64-linux-gnu-"
 
 # [toolchain.arm32]
-# prefix = "arm-linux-gnueabihf-"
+# path = "/opt/toolchain/arm"
 
 # [toolchain.riscv64]
-# prefix = "riscv64-linux-gnu-"
+# path = "/opt/toolchain/riscv64"
 
 # ---- 手动指定某模块符号表（自动配对失败时的逃生门）----
 # [module]

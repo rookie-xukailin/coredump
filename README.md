@@ -49,8 +49,8 @@ git clone <内网镜像> ~/Coredump
 cp -r ~/Coredump/swrd-skill-coredump-analyze ~/.codebuddy/skills/
 
 # 方式 B：导出精简包（含 INSTALL.md，适合内网 zip 摆渡分发）
-python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.6.0.zip
-unzip dist/swrd-skill-coredump-analyze-v3.6.0.zip -d ~/.codebuddy/skills/
+python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.7.0.zip
+unzip dist/swrd-skill-coredump-analyze-v3.7.0.zip -d ~/.codebuddy/skills/
 ```
 
 各 Agent 的技能目录（目录名保持 `swrd-skill-coredump-analyze`）：
