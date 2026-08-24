@@ -79,46 +79,48 @@ class LockAnalysis(object):
         return bool(self.deadlocks)
 
 
-def find_mutexes(core, threads):
+def find_mutexes(core, threads, progress=None):
     """在 core 全内存中扫描 pthread_mutex_t 结构。
 
     启发式：一个 48 字节区域，__lock 非 0 且 __owner 是已知线程 TID
     或 __kind 在合法范围（0-5），且后续字段看起来合理。
+
+    性能：可写内存可达几十 MB，逐偏移 struct.unpack_from 的纯 Python 循环
+    是锁分析的主要耗时（用户实测静默数分钟的位置）。这里改为 memoryview
+    零拷贝按字访问 + set 去重，并支持 progress 心跳。
     """
-    word = 8 if core.elfclass == 64 else 4
-    fmt = "<Q" if word == 8 else "<I"
     mutex_size = _MUTEX_SIZE if core.elfclass == 64 else _MUTEX_SIZE_32
 
     known_tids = set(t.tid for t in threads)
     locks = []
+    seen = set()
 
-    for r in core.regions:
-        if not r.readable or not r.write_bit:
-            continue
+    regions = [r for r in core.regions if r.readable and r.write_bit]
+    for ri, r in enumerate(regions, 1):
         data = r.data
-        for off in range(0, len(data) - mutex_size, 8):
-            try:
-                lock_val = struct.unpack_from("<i", data, off + _MUTEX_LOCK_OFF)[0]
-                if lock_val == 0:
-                    continue
-                owner = struct.unpack_from("<i", data, off + _MUTEX_OWNER_OFF)[0]
-                # 启发式判定
-                if owner == 0 and lock_val == 0:
-                    continue
-                # owner 必须是已知线程（或看起来像 TID）
-                if owner not in known_tids and owner != 0:
-                    # 检查 kind 字段是否合法
-                    kind = struct.unpack_from("<i", data, off + 16)[0]
-                    if kind < 0 or kind > 5:
-                        continue
-                addr = r.vaddr + off
-                # 避免重复
-                if any(l.addr == addr for l in locks):
-                    continue
-                kind = struct.unpack_from("<i", data, off + 16)[0]
-                locks.append(LockInfo(addr, owner, lock_val, kind))
-            except (struct.error, IndexError):
+        n4 = len(data) // 4
+        if n4 < 6:
+            continue
+        if progress:
+            progress("[锁] 扫描可写内存找锁：区域 %d/%d（0x%x，%.1fMB）"
+                     % (ri, len(regions), r.vaddr, len(data) / 1048576.0))
+        # glibc 32/64 位布局中 __lock/__owner/__kind 的字节偏移都是 0/8/16，
+        # 即 u32 视图下标 i / i+2 / i+4；扫描步长 8 字节与原实现一致
+        words = memoryview(data)[: n4 * 4].cast("I")
+        for i in range(0, n4 - 4, 2):
+            lock_val = words[i]
+            if lock_val == 0:
                 continue
+            owner = words[i + 2]
+            if owner != 0 and owner not in known_tids:
+                kind = words[i + 4]
+                if kind > 5:
+                    continue
+            addr = r.vaddr + i * 4
+            if addr in seen:
+                continue
+            seen.add(addr)
+            locks.append(LockInfo(addr, owner, lock_val, words[i + 4]))
 
     return locks
 
@@ -204,12 +206,12 @@ def detect_deadlock(edges):
     return cycles
 
 
-def analyze_locks(core, threads):
+def analyze_locks(core, threads, progress=None):
     """锁分析主入口。返回 LockAnalysis。"""
     result = LockAnalysis()
 
     # 1. 扫描活跃 mutex
-    result.locks = find_mutexes(core, threads)
+    result.locks = find_mutexes(core, threads, progress=progress)
     if result.locks:
         result.notes.append("检测到 %d 个活跃锁" % len(result.locks))
         for l in result.locks[:10]:

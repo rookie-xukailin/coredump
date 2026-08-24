@@ -216,6 +216,42 @@ def test_core_from_toml():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_lockmon_find_mutexes():
+    """锁扫描（memoryview 重写版）：伪造 mutex 命中，干扰项不误报。"""
+    import struct
+    from bmccore import lockmon
+
+    class _R(object):
+        def __init__(self, vaddr, blob):
+            self.vaddr = vaddr
+            self.data = bytes(blob)
+            self.readable = True
+            self.write_bit = True
+
+    blob = bytearray(65536)
+    # 命中项：lock=1 owner=4242 kind=0（埋在 0x100）
+    struct.pack_into("<i", blob, 0x100, 1)
+    struct.pack_into("<i", blob, 0x100 + 8, 4242)
+    struct.pack_into("<i", blob, 0x100 + 16, 0)
+    # 干扰项：lock 非零、owner 未知、kind=99（应被 kind 范围过滤）
+    struct.pack_into("<i", blob, 0x200, 7)
+    struct.pack_into("<i", blob, 0x200 + 8, 999)
+    struct.pack_into("<i", blob, 0x200 + 16, 99)
+
+    class _C(object):
+        elfclass = 64
+        regions = [_R(0x10000000, blob)]      # _R 构造时快照，须在埋数之后
+
+    class _T(object):
+        tid = 4242
+
+    hits = lockmon.find_mutexes(_C(), [_T()])
+    assert any(l.addr == 0x10000000 + 0x100 and l.owner_tid == 4242
+               for l in hits), "伪造 mutex 应被检出"
+    assert not any(l.addr == 0x10000000 + 0x200 for l in hits), \
+        "kind 越界干扰项不应误报"
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:
