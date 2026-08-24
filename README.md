@@ -49,8 +49,8 @@ git clone <内网镜像> ~/Coredump
 cp -r ~/Coredump/swrd-skill-coredump-analyze ~/.codebuddy/skills/
 
 # 方式 B：导出精简包（含 INSTALL.md，适合内网 zip 摆渡分发）
-python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.15.0.zip
-unzip dist/swrd-skill-coredump-analyze-v3.15.0.zip -d ~/.codebuddy/skills/
+python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.16.0.zip
+unzip dist/swrd-skill-coredump-analyze-v3.16.0.zip -d ~/.codebuddy/skills/
 ```
 
 各 Agent 的技能目录（目录名保持 `swrd-skill-coredump-analyze`）：
@@ -63,6 +63,8 @@ unzip dist/swrd-skill-coredump-analyze-v3.15.0.zip -d ~/.codebuddy/skills/
 | 通用兼容位 | `<项目>/.agents/skills/` | `~/.agents/skills/` |
 
 装好后对话里提到 core 文件 / "进程崩了/段错误/abort" 即自动触发。
+Agent 按叙事六步法分析后经 `scripts/render_report.py` 产出**叙事 HTML 报告**
+（narrative.json + 引擎取证合成，模板在 `templates/report_template.html`）。
 内网注意：命令统一用 `python3.8`（部分机器默认 python3 版本不一）；分析
 默认 `--offline`（零外部程序调用、零网络请求）；解包/中间产物/报告统一
 落在技能目录下 `workspace/`（自动创建）；不要设置 `DEBUGINFOD_URLS` 或

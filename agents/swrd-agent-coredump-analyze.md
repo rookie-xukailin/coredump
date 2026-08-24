@@ -97,15 +97,21 @@ SKILL.md 的 4c 节，按需取用。
 回溯调用关系是否合理（防栈污染假帧）；崩溃线程≠肇事线程（多线程场景）；
 "疑似"结论能否经源码分析升级为"确认"或否定。
 
-### 5. 输出报告（Markdown）
+### 5. 产出叙事 HTML 报告
 
-结构：**概要**（进程/架构/信号/崩溃点）→ **现场还原**（案发现场叙事：
-每线程在干什么/持有什么/等什么，多线程必须给"A 线程 xxx，但此时 B 线程
-xxx，由于 xxx，导致 xxx"的因果链，证据逐句标注来源节）→ **根因**
-（肇事代码+机制+取证证据）→ **修复建议**（直接修复 diff + 防御措施）→
-**置信度表**（确认/疑似/建议 + 依据）。报告的"线程现场还原"节（每线程
-顶部帧+锁关系）是组织叙事的底稿。**禁止复述现象**——"访问了非法地址"
-不是结论；证据不足就如实写卡在哪、缺什么。
+按 SKILL.md"叙事构建六步法"组装结果（线程角色表→逐线程业务动作→找
+共享对象→读读写点→A/B 因果链→缺口声明），写成 `narrative.json` 并渲染：
+
+```bash
+python3.8 <技能根目录>/scripts/render_report.py "$WS/report/narrative.json" \
+    --engine "$WS"/report/*_report.json \
+    --out "$WS/report/<案例名>_analysis.html"
+```
+
+narrative.json 字段：summary(tldr/tldr_level)/scene(叙事段落[])/
+thread_roles/root_cause(mechanism+culprit)/fixes/confidence/gaps——
+支持极简 markdown。对话里同时给 TL;DR + 叙事全文 + HTML 路径。
+**禁止复述现象**；证据不足就如实写卡在哪、缺什么。
 
 ## 原则
 

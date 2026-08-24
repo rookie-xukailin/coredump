@@ -73,10 +73,47 @@ class LockAnalysis(object):
         self.wait_graph = []      # WaitEdge 列表
         self.deadlocks = []       # 检测到的死锁环
         self.notes = []
+        self.futex_waits = {}     # tid -> {"sys": "futex"/"#N", "uaddr": int|None}
 
     @property
     def has_deadlock(self):
         return bool(self.deadlocks)
+
+
+# 各架构的 syscall 号寄存器 / 第一参数寄存器 / futex 系统调用号
+_SYSCALL_REGS = {
+    "riscv64": ("a7", "a0", 98),
+    "riscv32": ("a7", "a0", 98),
+    "arm64": ("x8", "x0", 98),
+    "arm32": ("r7", "r0", 240),
+    "x86_64": ("orig_rax", "rdi", 202),
+    "i386": ("orig_eax", "ebx", 240),
+}
+
+
+def block_points(core, threads):
+    """从各线程寄存器解码 dump 时刻的阻塞点（最后一次系统调用，启发式）。
+
+    返回 {tid: {"sys": "futex"/"#N", "uaddr": int|None}}。寄存器在系统调用
+    返回后可能被复用，故结果作为"疑似"证据使用（报告层已注明）。futex 的
+    uaddr 即用户态锁/条件变量地址，可与 mutex 扫描结果直接配对。
+    """
+    out = {}
+    if core.arch is None:
+        return out
+    info = _SYSCALL_REGS.get(core.arch.name)
+    if not info:
+        return out
+    nr_reg, arg_reg, futex_nr = info
+    for t in threads:
+        nr = t.regs.get(nr_reg)
+        if nr is None:
+            continue
+        if nr == futex_nr:
+            out[t.tid] = {"sys": "futex", "uaddr": t.regs.get(arg_reg)}
+        elif 0 < nr < 500:          # 合理 syscall 号范围：展示原号供人工比对
+            out[t.tid] = {"sys": "#%d" % nr, "uaddr": None}
+    return out
 
 
 def find_mutexes(core, threads, progress=None, full_scan=False):
@@ -239,6 +276,14 @@ def analyze_locks(core, threads, progress=None, full_scan=False):
     """锁分析主入口。返回 LockAnalysis。"""
     result = LockAnalysis()
 
+    # 0. 阻塞点（寄存器解码的 syscall/futex 等待地址）
+    result.futex_waits = block_points(core, threads)
+    n_futex = sum(1 for bp in result.futex_waits.values()
+                  if bp.get("sys") == "futex" and bp.get("uaddr"))
+    if n_futex:
+        result.notes.append("寄存器证据：%d 个线程正 futex 等待（地址见"
+                            "线程现场还原的阻塞点列）" % n_futex)
+
     # 1. 扫描活跃 mutex
     result.locks = find_mutexes(core, threads, progress=progress,
                                 full_scan=full_scan)
@@ -258,6 +303,23 @@ def analyze_locks(core, threads, progress=None, full_scan=False):
         result.notes.append("等待关系 %d 条" % len(result.wait_graph))
         for e in result.wait_graph[:10]:
             result.notes.append("  %r" % e)
+
+    # 2.5 futex 等待地址与已知锁配对 → 寄存器级等待边（比栈扫描更硬的证据）
+    lock_by_addr = {}
+    for l in result.locks:
+        if l.owner_tid:
+            lock_by_addr.setdefault(l.addr, l)
+    seen_edges = set((e.waiter_tid, e.lock_addr) for e in result.wait_graph)
+    for tid, bp in result.futex_waits.items():
+        u = bp.get("uaddr")
+        if bp.get("sys") != "futex" or not u:
+            continue
+        lk = lock_by_addr.get(u)
+        if lk and lk.owner_tid != tid and (tid, u) not in seen_edges:
+            result.wait_graph.append(WaitEdge(tid, u, lk.owner_tid))
+            seen_edges.add((tid, u))
+            result.notes.append("T%d futex 等待 0x%x，配对到持有者 T%d"
+                                "（寄存器证据）" % (tid, u, lk.owner_tid))
 
     # 3. 检测死锁
     result.deadlocks = detect_deadlock(result.wait_graph)

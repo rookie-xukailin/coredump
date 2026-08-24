@@ -65,6 +65,7 @@ def test_e2e_analyze():
         src_sec = [s for s in data["sections"] if s["title"] == "技能状态"][0]
         status_text = "\n".join(src_sec["lines"])
         assert "backtrace" in status_text
+        assert "vartrace" in status_text         # 变量生命周期技能应登记状态
 
         # 临时目录应被清理
         leftovers = [d for d in os.listdir(tmp) if d.startswith("bmccore_")]
@@ -341,6 +342,82 @@ def test_viz_toml_keys():
         cfg = Config()
         cfg.update_from_toml(toml)
         assert cfg.viz is True and cfg.viz_port == 9000 and cfg.viz_timeout == 30
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_block_points():
+    """阻塞点解码：riscv a7=98/a0=addr 命中 futex，其他号展示原号。"""
+    from bmccore.lockmon import block_points
+
+    class _Arch(object):
+        name = "riscv64"
+    core = type("C", (), {"arch": _Arch()})()
+
+    class _T(object):
+        def __init__(self, tid, regs):
+            self.tid = tid
+            self.regs = regs
+
+    ts = [_T(1, {"a7": 98, "a0": 0x7f4000210}),      # futex 等待
+          _T(2, {"a7": 73, "a0": 0}),                # ppoll → 展示原号
+          _T(3, {"a7": 0})]                          # 0 → 不报
+    bp = block_points(core, ts)
+    assert bp[1] == {"sys": "futex", "uaddr": 0x7f4000210}
+    assert bp[2]["sys"] == "#73" and bp[2]["uaddr"] is None
+    assert 3 not in bp
+
+
+def test_render_report_smoke():
+    """叙事 HTML 渲染：narrative.json + 引擎 json → 占位符全替换。"""
+    import subprocess
+    import json as _json
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tmp = tempfile.mkdtemp()
+    try:
+        narr = {
+            "case": "smoke",
+            "summary": {"process": "shd_main", "arch": "riscv64",
+                        "signal": "SIGSEGV", "fault_addr": "0x5858",
+                        "crash_point": "sensor_read @ sensor.c:88",
+                        "tldr": "T15 释放了 T12 仍在遍历的链表节点",
+                        "tldr_level": "确认"},
+            "scene": ["**案发时刻**：T12 正在遍历链表（证据：回溯节）。",
+                      "与此同时 **T15** 持锁 0x7f42 释放节点（证据：线程现场还原）。"],
+            "thread_roles": [{"tid": 12, "role": "崩溃者",
+                              "action": "遍历传感器链表",
+                              "evidence": "回溯 #0"}],
+            "root_cause": {"mechanism": "读侧无锁保护",
+                           "culprit": "```c\nfree(node);\n```"},
+            "fixes": [{"title": "读侧加锁", "body": "```c\nlock();\n```"}],
+            "confidence": [{"level": "确认", "claim": "UAF", "evidence": "指纹"}],
+            "gaps": ["T15 业务动作无符号帧"],
+        }
+        narr_path = os.path.join(tmp, "narrative.json")
+        with io.open(narr_path, "w", encoding="utf-8") as f:
+            _json.dump(narr, f, ensure_ascii=False)
+        engine = {"sections": [
+            {"title": "线程现场还原 (2 线程)", "lines": ["| tid | 状态 |", "|T12|💥|"]},
+            {"title": "无关节（不应出现）", "lines": ["x"]},
+        ]}
+        eng_path = os.path.join(tmp, "engine_report.json")
+        with io.open(eng_path, "w", encoding="utf-8") as f:
+            _json.dump(engine, f, ensure_ascii=False)
+        out = os.path.join(tmp, "smoke_analysis.html")
+        r = subprocess.run([sys.executable,
+                            os.path.join(root, "swrd-skill-coredump-analyze",
+                                         "scripts", "render_report.py"),
+                            narr_path, "--engine", eng_path, "--out", out],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert r.returncode == 0, r.stdout.decode("utf-8", "replace")
+        html = io.open(out, encoding="utf-8").read()
+        assert "遍历传感器链表" in html and "案发时刻" in html
+        assert "线程现场还原" in html           # 引擎证据节并入
+        assert "无关节" not in html             # 关键词过滤生效
+        for ph in ("__CASE__", "__TLDR__", "__SCENE__", "__EVIDENCE__",
+                   "__FIXES__", "__GAPS__"):
+            assert ph not in html, "占位符未替换: %s" % ph
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

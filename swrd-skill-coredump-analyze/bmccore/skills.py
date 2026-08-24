@@ -4,6 +4,7 @@
 每个技能独立、可单独失败（失败记入报告的"技能状态"节，不影响其他技能）。
 """
 import os
+import re
 import time
 
 from . import console as console_mod
@@ -19,6 +20,13 @@ from .modules import group_modules
 from .report import Report
 from .source import SourceIndex
 
+def _md_inline(text):
+    """vartrace 事件 detail 中的 <code> HTML 标签转 markdown 反引号。"""
+    if not text:
+        return ""
+    return re.sub(r"</?code>", "`", text)
+
+
 def _throttled(log, every=2.0):
     """进度节流器：每 every 秒最多放行一条（长循环心跳用，避免刷屏）。"""
     state = {"t": 0.0}
@@ -32,7 +40,7 @@ def _throttled(log, every=2.0):
 
 
 ALL_SKILLS = ("symbols", "backtrace", "scan", "heap", "console", "triage",
-              "source", "cfi", "locks", "viz")
+              "source", "vartrace", "cfi", "locks", "viz")
 
 
 class Pipeline(object):
@@ -234,6 +242,29 @@ class Pipeline(object):
         else:
             self._mark("source", "skipped", "未启用或未配置 --source-root")
 
+        # ---- 7.5 变量生命周期（vartrace）：崩溃行指针的 声明→赋值→释放→崩溃 轨迹
+        var_events = None
+        var_root = None
+        if "vartrace" in want and snippets and cfg.source_root:
+            from . import vartrace as vartrace_mod
+            f0, ln0 = snippets[0][0], snippets[0][1]
+            line_txt = ""
+            for _n, _txt, _hit in snippets[0][3]:
+                if _hit:
+                    line_txt = _txt
+                    break
+            if line_txt:
+                var_events, var_root = vartrace_mod.trace_variable(
+                    cfg.source_root, f0, ln0, line_txt,
+                    fault_addr=(core.siginfo or {}).get("addr"))
+                self._mark("vartrace", "ok" if var_events else "skipped",
+                           "" if var_events else (var_root or "未提取到指针变量"))
+            else:
+                self._mark("vartrace", "skipped", "崩溃行源码文本不可得")
+        else:
+            self._mark("vartrace", "skipped",
+                       "无源码联动（未配 source_root 或回溯无行号）")
+
         # ---- 8. CFI 离线回溯（精确展开，无 gdb 时的最佳兜底） ----
         cfi_frames = None
         if "cfi" in want and core.crash_thread:
@@ -289,12 +320,68 @@ class Pipeline(object):
             "toolchain": tchain,
             "cfi_frames": cfi_frames,
             "lock_result": lock_result,
+            "var_events": var_events,
+            "var_root_cause": var_root,
         }
 
 
 # ---------------------------------------------------------------------------
 # 报告组装
 # ---------------------------------------------------------------------------
+
+def _scene_rows(core, results):
+    """每线程现场行（表格与叙事共用）：tid/崩溃/顶部帧/栈转储/持锁/等锁。"""
+    crash = core.crash_thread
+    lock_result = results.get("lock_result")
+    held_by = {}      # tid -> [lock_addr]
+    wait_by = {}      # tid -> [(lock_addr, holder_tid)]
+    if lock_result:
+        for lk in lock_result.locks:
+            held_by.setdefault(lk.owner_tid, []).append(lk.addr)
+        for e in lock_result.wait_graph:
+            wait_by.setdefault(e.waiter_tid, []).append((e.lock_addr, e.holder_tid))
+    tops = {}         # tid -> 顶部帧描述（新→旧）
+    for tr in results["traces"]:
+        funcs = [fr.func for fr in tr.frames[:3] if fr and fr.func]
+        if funcs:
+            tops[tr.lwp] = " ← ".join(funcs)
+    for tid, sr in results["scan_results"].items():
+        if tid in tops:
+            continue
+        names = []
+        for f in sr.frames[:3]:
+            nm = f.func or f.loc
+            if nm and nm not in names:
+                names.append(nm)
+        if names:
+            tops[tid] = " ← ".join(names)
+    rows = []
+    futex_waits = {}
+    if lock_result:
+        futex_waits = getattr(lock_result, "futex_waits", None) or {}
+    for t in core.threads:
+        lk_txt = []
+        for a in held_by.get(t.tid, [])[:3]:
+            lk_txt.append("持锁 0x%x" % a)
+        for a, h in wait_by.get(t.tid, [])[:3]:
+            lk_txt.append("等锁 0x%x(持有者T%d)" % (a, h))
+        blk = ""
+        bp = futex_waits.get(t.tid)
+        if bp:
+            if bp.get("sys") == "futex" and bp.get("uaddr"):
+                blk = "futex@0x%x" % bp["uaddr"]
+            else:
+                blk = "syscall %s" % bp.get("sys", "?")
+        rows.append({
+            "tid": t.tid,
+            "is_crash": bool(crash and t.tid == crash.tid),
+            "top": tops.get(t.tid) or "",
+            "stack_dumped": bool(core.region_of(t.sp)),
+            "locks": "；".join(lk_txt),
+            "block": blk,
+        })
+    return rows, held_by, wait_by
+
 
 def build_report(results, cfg, intake_meta=None, source_name=None):
     core = results["core"]
@@ -328,55 +415,31 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
         for k in keys:
             if k in crash.regs:
                 regs.append("| %s | 0x%x |" % (k, crash.regs[k]))
-        for k in ("x0", "a0", "r0"):
+        for k in ("x8", "a7", "r7", "orig_rax"):   # syscall 号寄存器（按架构命中其一）
+            if k in crash.regs:
+                regs.append("| %s(syscall号) | 0x%x |" % (k, crash.regs[k]))
+        for k in ("x0", "x1", "x2", "a0", "a1", "a2", "r0", "r1", "r2"):
             if k in crash.regs:
                 regs.append("| %s | 0x%x |" % (k, crash.regs[k]))
         rep.add("崩溃线程寄存器 (tid=%d)" % crash.tid, regs)
 
-    # 线程现场还原（案发现场总览：每线程一行——在干什么/持什么/等什么）
-    lock_result = results.get("lock_result")
-    held_by = {}      # tid -> [lock_addr]
-    wait_by = {}      # tid -> [(lock_addr, holder_tid)]
-    if lock_result:
-        for lk in lock_result.locks:
-            held_by.setdefault(lk.owner_tid, []).append(lk.addr)
-        for e in lock_result.wait_graph:
-            wait_by.setdefault(e.waiter_tid, []).append((e.lock_addr, e.holder_tid))
-    tops = {}         # tid -> 顶部帧描述（新→旧）
-    for tr in results["traces"]:
-        funcs = [fr.func for fr in tr.frames[:3] if fr and fr.func]
-        if funcs:
-            tops[tr.lwp] = " ← ".join(funcs)
-    for tid, sr in results["scan_results"].items():
-        if tid in tops:
-            continue
-        names = []
-        for f in sr.frames[:3]:
-            nm = f.func or f.loc
-            if nm and nm not in names:
-                names.append(nm)
-        if names:
-            tops[tid] = " ← ".join(names)
-    if core.threads:
-        lines = ["| tid | 状态 | 顶部帧（新→旧） | 锁关系 |", "|---|---|---|---|"]
-        for t in core.threads:
-            state = "💥崩溃" if (crash and t.tid == crash.tid) else ""
-            lk_txt = []
-            for a in held_by.get(t.tid, [])[:3]:
-                lk_txt.append("持锁 0x%x" % a)
-            for a, h in wait_by.get(t.tid, [])[:3]:
-                lk_txt.append("等锁 0x%x(持有者T%d)" % (a, h))
-            if not core.region_of(t.sp):
-                top = "（栈未转储）"
-            else:
-                top = tops.get(t.tid) or "（无符号化帧）"
-            lines.append("| T%d | %s | %s | %s |" % (
-                t.tid, state, top, "；".join(lk_txt) or "-"))
+    # 线程现场还原（案发现场总览：每线程一行——在干什么/持什么/等什么/阻塞在哪）
+    rows, _held_by, _wait_by = _scene_rows(core, results)
+    if rows:
+        lines = ["| tid | 状态 | 阻塞点(疑似) | 顶部帧（新→旧） | 锁关系 |",
+                 "|---|---|---|---|---|"]
+        for r in rows:
+            state = "💥崩溃" if r["is_crash"] else ""
+            top = r["top"] or ("（栈未转储）" if not r["stack_dumped"]
+                               else "（无符号化帧）")
+            lines.append("| T%d | %s | %s | %s | %s |" % (
+                r["tid"], state, r["block"] or "-", top, r["locks"] or "-"))
         lines.append("")
-        lines.append("> 现场还原：结合各线程顶部帧与锁关系还原案发时刻在做什么。"
-                     "崩溃线程≠肇事线程——重点看持锁/等锁的交叉关系与共享数据"
-                     "的访问路径。")
-        rep.add("线程现场还原 (%d 线程)" % len(core.threads), lines)
+        lines.append("> 阻塞点来自寄存器解码（dump 时刻最后一次系统调用，故标"
+                     "疑似）：futex@0x… 即该线程在等此地址的锁/条件变量。"
+                     "崩溃线程≠肇事线程——重点看持锁/等锁/阻塞地址的交叉与"
+                     "共享数据的访问路径。")
+        rep.add("线程现场还原 (%d 线程)" % len(rows), lines)
 
     # 模块配对
     if results["matches"]:
@@ -470,6 +533,28 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
             lines.append(("%s %5d %s" % (">" if hit else " ", n, txt)))
         lines.append("```")
         rep.add("源码片段 %s:%d" % (f, ln), lines)
+
+    # 变量生命周期（崩溃指针的静态溯源轨迹）
+    var_events = results.get("var_events")
+    if var_events:
+        lines = []
+        root_cause = results.get("var_root_cause")
+        if root_cause:
+            lines.append("**指向根因：%s**" % _md_inline(root_cause))
+            lines.append("")
+        for ev in var_events:
+            lines.append("- %s **%s**（%s:%s）%s" % (
+                ev.get("icon", ""), ev.get("title", ""),
+                ev.get("file", "?"), ev.get("line", "?"),
+                _md_inline(ev.get("detail", ""))))
+            code = (ev.get("code") or "").strip()
+            if code:
+                lines.append("")
+                lines.append("  `%s`" % code)
+        lines.append("")
+        lines.append("> 生命周期由源码静态追溯（声明/初始化/置空/释放的所有位置），"
+                     "是叙事的骨架素材——与运行时栈/堆证据交叉验证后采信。")
+        rep.add("变量生命周期 (vartrace)", lines)
 
     # 结论
     concl = ["| 可信度 | 结论 | 依据 |", "|---|---|---|"]

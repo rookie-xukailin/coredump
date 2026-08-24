@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.15.0
+version: 3.16.0
 ---
 
 # Coredump 智能分析
@@ -141,11 +141,32 @@ cat "<技能根目录>/workspace/report/"*_report.json
 | 字段 | 含义 | 后续动作 |
 |---|---|---|
 | `定位结论.conclusions` | 最终判定（确认/疑似） | 这是分析的起点 |
+| `线程现场还原` | 每线程顶部帧 + 阻塞点(futex@地址) + 持锁/等锁 | 叙事底稿：线程角色与交叉关系 |
+| `变量生命周期` | 崩溃指针的 声明→初始化→释放→崩溃 轨迹 | 溯源骨架：核对初始化缺失/置空/释放路径 |
+| `崩溃线程寄存器` | syscall 号 + 参数寄存器（a0-a2 等） | 判断崩溃调用本身及其参数值 |
 | `回溯.frames` | 调用栈（file:line） | → 去读这些源码 |
 | `堆取证.notes` | chunk 损坏/受害对象/指纹 | → 去源码 grep 指纹 |
 | `栈扫描.scan_frames` | gdb 断链时的降级回溯 | → 验证帧是否合理 |
 | `符号配对.modules` | 哪些模块配上了/missing | → 提醒用户补符号表 |
 | `console 关键行` | glibc abort 消息 | → 定位是堆检查还是 assert |
+
+### 叙事构建六步法（从证据到故事——你的核心方法）
+
+第 4 步的源码取证服务于这里；最终叙事严格按六步组装：
+
+1. **线程角色表**：以报告"线程现场还原"为底稿，给每个线程标角色
+   （💥崩溃者 / 持锁者 / 等待者 / 阻塞者 / 旁观者），记下阻塞点——
+   `futex@0x…` 就是在等这个地址的锁/条件变量（寄存器级证据）
+2. **逐线程业务动作**：对有符号帧的线程，读其顶部 2-3 帧对应的源码
+   函数，各写一句"它在做什么业务"（写业务语义，不许复述函数名）
+3. **找共享对象**：交叉比对崩溃线程与其他线程的帧、锁地址、堆取证
+   受害对象——找同时出现在两方的数据（锁/链表节点/全局缓存/消息队列）
+4. **读共享对象的全部读写点**（用 4c 节的搜索模式），确定"谁在什么
+   条件下改了它、谁在读它"
+5. **组装因果链**：按"A 线程 xxx，但此时 B 线程 xxx，由于 xxx（源码
+   机制），导致 xxx（崩溃）"成句；每个分句标注证据出处（节名+地址/行号）
+6. **缺口如实声明**：证据断在哪就写哪（如"T15 无符号帧，业务动作
+   不可考"），并列出补什么证据能闭环——不许拿现象冒充推断
 
 ### 第 4 步：深入源码分析（你的核心价值）
 
@@ -677,7 +698,8 @@ grep -B3 -A10 "SIGSEGV\|SIGBUS" --include="*.c" <源码树>/ | grep -A10 "handle
 
 ### 第 5 步：输出分析报告
 
-用以下格式给用户（Markdown）：
+叙事质量标准如下例（各节内容shape）；**交付形态**为 narrative.json +
+渲染 HTML 报告 + 对话内文字摘要，生成流程见本步末尾：
 
 ```markdown
 ## 崩溃分析
@@ -742,6 +764,39 @@ assert(dst + sizeof(pat) <= g_led->curve + sizeof(g_led->curve));
 | 肇事代码：led_play_breath 偏移错误 | 确认 | 指纹匹配 + 源码分析 |
 | 修复方案 | 建议 | 基于根因推断 |
 ```
+
+**交付流程**：把六步法结果写成 `narrative.json`（全部中文；字段支持
+极简 markdown：段落/表格/```代码块```/**粗体**/`行内码`）：
+
+```json
+{
+  "case": "案例名（默认 core 文件名去后缀）",
+  "summary": {"process": "...", "arch": "...", "signal": "...",
+              "fault_addr": "0x...", "crash_point": "func @ file:line",
+              "tldr": "一句话根因", "tldr_level": "确认|疑似|建议"},
+  "scene": ["案发时刻……（证据：概览节）",
+            "与此同时 T15 ……（证据：线程现场还原/回溯节）",
+            "由于……（sensor.c:80 读侧无锁），导致……"],
+  "thread_roles": [{"tid": 12, "role": "崩溃者",
+                    "action": "正在遍历传感器链表",
+                    "evidence": "回溯 #0 sensor_read"}],
+  "root_cause": {"mechanism": "机制解释段落",
+                 "culprit": "肇事代码位置 + ```c 片段```"},
+  "fixes": [{"title": "直接修复", "body": "```c\n// diff\n```"}],
+  "confidence": [{"level": "确认", "claim": "...", "evidence": "..."}],
+  "gaps": ["证据缺口与补救方式"]
+}
+```
+
+渲染 HTML（你不写 HTML，只写 JSON；报告落在 workspace/report/）：
+
+```bash
+python3.8 <技能根目录>/scripts/render_report.py "$WS/report/narrative.json" \
+    --engine "$WS"/report/*_report.json \
+    --out "$WS/report/<案例名>_analysis.html"
+```
+
+对话里同时给用户：**TL;DR + 现场还原叙事全文 + HTML 报告路径**。
 
 ## 重要原则
 
