@@ -6,3 +6,4 @@ bmccore_report/
 *.tar.gz.tmp
 .pytest_cache/
 .zcode/
+dist/

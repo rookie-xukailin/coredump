@@ -35,6 +35,36 @@ python3 bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
 
 详见 [docs/使用说明.md](docs/使用说明.md)。
 
+## 作为 Agent 技能（Skill）使用
+
+**整个仓库就是一个自包含技能包**：`SKILL.md` 在仓库根目录作为入口，
+分析引擎（`bmccore.py` + `bmccore/` + 内置 `open/pyelftools`）随技能自带，
+零 pip 依赖，目标机器只需 Python 3.8+——适配内网/离线环境。
+
+两种接入方式：
+
+```bash
+# 方式 A：整个仓库 clone 成技能目录（含 tests/tools 等开发资产，可跑全量自检）
+git clone <内网镜像> ~/.codebuddy/skills/coredump-analyze
+
+# 方式 B：导出精简包（86 个运行时文件 + INSTALL.md，适合内网摆渡分发）
+python3 tools/export_skill.py     # 产出 dist/coredump-analyze/ 和 dist/*-v3.0.0.zip
+cp -r dist/coredump-analyze ~/.codebuddy/skills/
+```
+
+各 Agent 的技能目录（目录名保持 `coredump-analyze`）：
+
+| Agent | 项目级 | 用户级 |
+|---|---|---|
+| CodeBuddy | `<项目>/.codebuddy/skills/` | `~/.codebuddy/skills/` |
+| Claude Code | `<项目>/.claude/skills/` | `~/.claude/skills/` |
+| ZCode | `<项目>/.zcode/skills/` | `~/.zcode/skills/` |
+| 通用兼容位 | `<项目>/.agents/skills/` | `~/.agents/skills/` |
+
+装好后对话里提到 core 文件 / "进程崩了/段错误/abort" 即自动触发。
+内网注意：分析默认 `--offline`（零外部程序调用、零网络请求）；不要设置
+`DEBUGINFOD_URLS` 或 `debuginfod_url`（默认关闭，配置后才会发起 HTTP 拉符号）。
+
 ## 傻瓜式使用指南（从零开始，照抄即可）
 
 下面按"第一次用"和"日常用"两个场景给出可直接复制的完整命令。

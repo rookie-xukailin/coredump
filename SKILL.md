@@ -1,10 +1,31 @@
 ---
 name: coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 2.0.0
+version: 3.0.0
 ---
 
 # Coredump 智能分析
+
+## 技能包结构（自带完整引擎，无需单独部署工具）
+
+本技能是自包含的——分析引擎随技能包一起分发，就放在本 SKILL.md 所在目录（下称**技能根目录**）：
+
+```
+<技能根目录>/
+├── SKILL.md               ← 本文件（入口）
+├── bmccore.py             ← 引擎 CLI 入口（python3 直接调用）
+├── bmccore/               ← 引擎包（解析/回溯/堆取证/结论）
+├── open/pyelftools        ← 内置依赖（无需 pip 安装）
+├── scripts/
+│   └── coredump_analyze.py  ← 报告 JSON → 结构化数据 的辅助脚本
+└── bmccore.toml.example   ← 配置模板
+```
+
+**定位技能根目录**：加载技能时系统会告知本 SKILL.md 的路径（base directory），
+其所在目录即技能根目录。不确定时 `ls` 确认该目录下存在 `bmccore.py`。
+若不存在，说明技能包不完整，请用户重新获取完整包（不要猜测其他路径）。
+
+环境要求：Python 3.8+（纯标准库 + 内置依赖，零 pip 安装，适配内网/离线环境）。
 
 ## 你是什么
 
@@ -55,19 +76,24 @@ version: 2.0.0
 ### 第 2 步：调用 bmccore 获取结构化数据
 
 ```bash
-# 找到 bmccore 工具（根据实际部署位置调整）
-BMCORE="${BMCORE_DIR:-/path/to/bmccore}/bmccore.py"
+# 引擎随技能包自带：<技能根目录> 即本 SKILL.md 所在目录
+BMCORE="<技能根目录>/bmccore.py"
 
-# 全量分析
+# 全量分析（--offline：纯 Python 模式，不依赖 gdb/addr2line 等任何外部程序，
+# 符号配对/CFI回溯/栈扫描/行号/堆取证全可用——内网/无交叉工具链环境默认用它）
 python3 "$BMCORE" analyze <core文件> \
     --symbol-table <符号表目录> \
     --source-root <源码树> \
     [--console-log <串口日志>] \
-    [--offline] \
+    --offline \
     -o /tmp/bmccore_out
+
+# 若机器上装有交叉 gdb（aarch64-linux-gnu-gdb / gdb-multiarch），
+# 去掉 --offline 可额外获得 gdb 精确回溯（工具链自动探测）
 ```
 
-**如果工具不在 PATH 里**，先问用户工具部署在哪里。不要猜测路径。
+**确认技能根目录下存在 `bmccore.py`**；不存在说明技能包不完整，
+请用户重新获取，不要猜测其他路径。
 
 **工具会输出**：
 - `*_report.md`（人读格式，含源码片段）
@@ -78,8 +104,8 @@ python3 "$BMCORE" analyze <core文件> \
 读 JSON 报告，提取关键数据：
 
 ```bash
-# 如果有辅助脚本
-python3 <skill目录>/coredump_analyze.py /tmp/bmccore_out/*_report.json
+# 辅助脚本同样随技能包自带
+python3 <技能根目录>/scripts/coredump_analyze.py /tmp/bmccore_out/*_report.json
 
 # 或者直接读 JSON
 cat /tmp/bmccore_out/*_report.json
