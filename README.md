@@ -49,8 +49,8 @@ git clone <内网镜像> ~/Coredump
 cp -r ~/Coredump/swrd-skill-coredump-analyze ~/.codebuddy/skills/
 
 # 方式 B：导出精简包（含 INSTALL.md，适合内网 zip 摆渡分发）
-python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.1.0.zip
-unzip dist/swrd-skill-coredump-analyze-v3.1.0.zip -d ~/.codebuddy/skills/
+python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.2.0.zip
+unzip dist/swrd-skill-coredump-analyze-v3.2.0.zip -d ~/.codebuddy/skills/
 ```
 
 各 Agent 的技能目录（目录名保持 `swrd-skill-coredump-analyze`）：
@@ -194,7 +194,7 @@ python3.8 swrd-skill-coredump-analyze/bmccore.py info <core文件或tar.gz包>
 python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> [--console-log console.log]
 
 # 手动指定符号表/源码（不想写 toml 时）
-python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --symbol-table /符号表文件或目录 --source-root /源码树
+python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --symbol-table /符号表目录或rootfs_symbol.tgz --source-root /源码树
 
 # 主程序配不上时强制指定
 python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --exe /路径/主程序

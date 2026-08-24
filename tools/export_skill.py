@@ -67,8 +67,9 @@ INSTALL_MD = """# swrd-skill-coredump-analyze 技能安装说明
 - 解包/中间产物/报告统一落在技能目录下 `workspace/`（自动创建，可随时清理）；
 - 请勿设置 `DEBUGINFOD_URLS` 环境变量或 bmccore.toml 的 `debuginfod_url`
   （默认关闭；配置后才会按 build-id 发起 HTTP 拉取符号）；
-- 根因分析需要内网可达的符号表目录与源码树，仅有 core 文件时
-  技能会退化为"崩在哪"的定位。
+- 根因分析需要内网可达的符号表与源码树（符号表支持目录/单个 ELF/
+  rootfs_symbol.tgz 包，包自动解压到 workspace 缓存复用），仅有 core
+  文件时技能会退化为"崩在哪"的定位。
 """
 
 

@@ -73,6 +73,40 @@ def test_e2e_analyze():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_symbol_table_archive():
+    """--symbol-table 支持 rootfs_symbol.tgz 形态：解压到 workdir 缓存并正常分析。"""
+    tmp = tempfile.mkdtemp()
+    try:
+        core_path, art = _build_arm64_env(tmp)
+        pkg = os.path.join(tmp, "3_core-2078599823-remotexdp-6761.tar.gz")
+        with tarfile.open(pkg, "w:gz") as tf:
+            tf.add(core_path, arcname="core")
+        symtgz = os.path.join(tmp, "rootfs_symbol.tgz")
+        with tarfile.open(symtgz, "w:gz") as tf:
+            tf.add(art, arcname=os.path.join("usr/lib", os.path.basename(art)))
+
+        workdir = os.path.join(tmp, "ws")
+        outdir = os.path.join(tmp, "report_out2")
+        from bmccore.cli import main
+        rc = main(["analyze", pkg,
+                   "--symbol-table", symtgz,
+                   "-o", outdir, "--format", "md",
+                   "--workdir", workdir])
+        assert rc == 0
+        # 解压落在 workdir/symbols/<包名>/，嵌套目录（usr/lib/...）应被递归扫描
+        sym_dir = os.path.join(workdir, "symbols", "rootfs_symbol")
+        assert os.path.isdir(sym_dir), "符号表包应解到 workdir/symbols/ 下"
+        marker = os.path.join(sym_dir, ".bmccore_src.json")
+        assert os.path.isfile(marker), "应写入缓存 marker（源包 mtime/size）"
+        md = os.path.join(outdir, "3_core-2078599823-remotexdp-6761_report.md")
+        assert os.path.isfile(md)
+        content = io.open(md, "r", encoding="utf-8").read()
+        assert "符号配对" in content
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

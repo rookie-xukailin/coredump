@@ -7,13 +7,61 @@
     python3.8 bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
 """
 import argparse
+import json
 import os
+import shutil
 import sys
+import tarfile
+import tempfile
 
 from . import __version__
 from bmccore.config import Config
 from bmccore.intake import intake
 from bmccore.skills import Pipeline, build_report
+
+_SYM_ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".tar.xz")
+
+
+def _expand_symbol_archive(path, workdir, log):
+    """--symbol-table 传 tar 包（rootfs_symbol.tgz 等）时解压并返回目录。
+
+    解压结果按包名缓存在 workdir/symbols/<包名>/ 下（未指定 workdir 时用
+    系统临时目录）；marker 文件记录源包 mtime/size，源包更新后自动重解，
+    避免用错版本的符号表。目录/单文件输入原样返回。
+    """
+    if not path or not path.lower().endswith(_SYM_ARCHIVE_SUFFIXES):
+        return path
+    if not os.path.isfile(path):
+        return path        # 不存在的路径交给后续符号技能如实报错
+
+    stem = os.path.basename(path)
+    for suf in _SYM_ARCHIVE_SUFFIXES:
+        if stem.lower().endswith(suf):
+            stem = stem[: -len(suf)]
+            break
+    cache_root = workdir or os.path.join(tempfile.gettempdir(), "bmccore_symbols")
+    target = os.path.join(cache_root, "symbols", stem)
+    stamp = {"src": os.path.abspath(path), "mtime": os.path.getmtime(path),
+             "size": os.path.getsize(path)}
+    marker = os.path.join(target, ".bmccore_src.json")
+    if os.path.isdir(target):
+        try:
+            with open(marker, encoding="utf-8") as f:
+                old = json.load(f)
+        except Exception:
+            old = None
+        if old == stamp:
+            log("[符号] 复用已解压符号表: %s" % target)
+            return target
+        shutil.rmtree(target, ignore_errors=True)   # 源包已更新，重解
+
+    os.makedirs(target, exist_ok=True)
+    log("[符号] 解压符号表包 %s -> %s" % (os.path.basename(path), target))
+    with tarfile.open(path, "r:*") as tf:
+        tf.extractall(target)
+    with open(marker, "w", encoding="utf-8") as f:
+        json.dump(stamp, f)
+    return target
 
 
 def _load_config(args):
@@ -98,6 +146,8 @@ def cmd_analyze(args):
     if workdir:
         workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
         os.makedirs(workdir, exist_ok=True)
+    if cfg.symbol_table:
+        cfg.symbol_table = _expand_symbol_archive(cfg.symbol_table, workdir, log)
     res = intake(args.core, keep_temp=True, workroot=workdir)
     try:
         pipe = Pipeline(res.core_path, cfg, log=log)
@@ -152,7 +202,9 @@ def main(argv=None):
     p_an.add_argument("core", help="core 文件或 tar.gz 包")
     p_an.add_argument("--symbol-table", metavar="PATH",
                       help="符号表文件或目录的绝对路径（编译阶段单独产出的 ELF/"
-                           "符号表文件，含 build-id+symtab+DWARF）")
+                           "符号表文件，含 build-id+symtab+DWARF）；也支持 "
+                           "rootfs_symbol.tgz 等 tar 包（.tar.gz/.tgz/.tar/.tar.xz），"
+                           "自动解压到 --workdir 下缓存复用")
     p_an.add_argument("--artifact-dir", metavar="PATH", dest="artifact_dir",
                       help="[兼容旧参数] 未strip编译产物根目录，等价 --symbol-table")
     p_an.add_argument("--source-root", help="源码树根目录")

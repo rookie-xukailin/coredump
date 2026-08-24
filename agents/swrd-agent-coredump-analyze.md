@@ -32,7 +32,7 @@ SKILL.md 的完整方法论（可直接 read_file，或经 use_skill 加载；�
 | 必需性 | 输入 | 说明 |
 |---|---|---|
 | 必需 | core 文件 | ELF core / .gz / tar.gz 崩溃包 |
-| 必需 | 符号表目录 | 编译阶段单独产出的未 strip ELF（含 build-id+symtab+DWARF） |
+| 必需 | 符号表 | 目录/单个 ELF/rootfs_symbol.tgz 包均可（包自动解压到 workspace 缓存复用） |
 | 必需 | 源码树 | 没有它只能做"哪里崩"，做不了"为什么崩" |
 | 强烈建议 | 串口日志 | glibc 堆报错只打印在 stderr，core 里没有 |
 
@@ -49,7 +49,7 @@ BMCORE="<技能根目录>/bmccore.py"     # 均为绝对路径（技能根目录
 WS="<技能根目录>/workspace"
 
 python3.8 "$BMCORE" analyze <core文件> \
-    --symbol-table <符号表目录> \
+    --symbol-table <符号表目录或rootfs_symbol.tgz> \
     --source-root <源码树> \
     [--console-log <串口日志>] \
     --offline \

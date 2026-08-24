@@ -4,6 +4,8 @@
 # 符号表文件或目录的绝对路径（编译阶段单独产出的文件，含build-id+symtab+DWARF）
 # - 单个文件: symbol_table = "/home/bmc/build/symbols/main.elf"
 # - 目录:     symbol_table = "/home/bmc/build/symbols/"
+# - tar 包:   symbol_table = "/home/bmc/build/rootfs_symbol.tgz"
+#             （自动解压到 --workdir 下缓存复用，源包更新自动重解）
 symbol_table = "/home/bmc/build/symbols"
 
 # 源码树根（报告贴崩溃行上下文）

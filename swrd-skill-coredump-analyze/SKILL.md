@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.1.0
+version: 3.2.0
 ---
 
 # Coredump 智能分析
@@ -58,7 +58,8 @@ version: 3.1.0
 **你需要的四个路径**（缺哪个问哪个，不要猜、不要跳过分析）：
 
 1. **core 文件路径**（必需）：ELF core / .gz / tar.gz 包
-2. **符号表目录**（必需）：编译阶段单独产出的未 strip ELF 文件
+2. **符号表**（必需）：编译阶段单独产出的未 strip ELF——目录、单个文件、
+   或 `rootfs_symbol.tgz` 之类 tar 包均可（包会自动解压到 workspace 缓存复用）
 3. **工程源码路径**（必需）：崩溃进程的源代码根目录——没有它你只能做
    "哪里崩了"的定位，做不了"为什么崩"的根因分析和修复建议
 4. **串口日志**（可选但强烈建议）：glibc 堆报错只打印在 stderr，core 里没有
@@ -75,7 +76,7 @@ version: 3.1.0
 | 必需 | 说明 | 示例 |
 |---|---|---|
 | core 文件 | 崩溃转储（裸 ELF / .gz / tar.gz） | `1_core-2078599821-remotexdp-6759.tar.gz` |
-| 符号表目录 | 编译阶段单独产出的未 strip ELF 文件 | `/home/bmc/build/symbols/` |
+| 符号表 | 目录/单个 ELF/rootfs_symbol.tgz 包均可（自动解压缓存） | `/home/bmc/build/rootfs_symbol.tgz` |
 | 源码树 | 崩溃进程的源代码 | `/home/bmc/src/bmc-project/` |
 | 串口日志（可选但强烈建议） | 设备 stderr 输出 | `console.log` |
 
@@ -88,12 +89,14 @@ BMCORE="<技能根目录>/bmccore.py"
 # 工作区：解包/中间产物/报告统一放技能目录下的 workspace/（自动创建）
 # --workdir/-o 必须用绝对路径：技能根目录取自技能加载时的 base directory，
 # 本身即绝对路径；你执行命令时 cwd 不确定，相对路径会落到意料之外的位置
+# 符号表传 tar 包（rootfs_symbol.tgz）时自动解到 "$WS/intake/symbols/" 下，
+# 源包 mtime/size 变化会自动重解，不会用错版本
 WS="<技能根目录>/workspace"
 
 # 全量分析（--offline：纯 Python 模式，不依赖 gdb/addr2line 等任何外部程序，
 # 符号配对/CFI回溯/栈扫描/行号/堆取证全可用——内网/无交叉工具链环境默认用它）
 python3.8 "$BMCORE" analyze <core文件> \
-    --symbol-table <符号表目录> \
+    --symbol-table <符号表目录或rootfs_symbol.tgz> \
     --source-root <源码树> \
     [--console-log <串口日志>] \
     --offline \
