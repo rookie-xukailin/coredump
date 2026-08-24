@@ -24,7 +24,7 @@ for NAME in $CASES; do
         ARGS=(analyze "$CORE" -o $W/reports_offline/$TAG --offline)
         CLOG=$LOGS/$TAG.console.log
         [ -f "$CLOG" ] && ARGS+=(--console-log "$CLOG")
-        ( cd $CORES && python3 $PROJ/bmccore.py "${ARGS[@]}" ) > $LOGS/${TAG}.offline.log 2>&1
+        ( cd $CORES && python3 $PROJ/coredump-analyze/bmccore.py "${ARGS[@]}" ) > $LOGS/${TAG}.offline.log 2>&1
         RC=$?
         [ $RC -ne 0 ] && echo "[$TAG] ANALYZE-RC=$RC" | tee -a $LOGS/summary_offline.log \
                      || echo "[$TAG] ANALYZE-OK" | tee -a $LOGS/summary_offline.log

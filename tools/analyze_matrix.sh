@@ -29,7 +29,7 @@ for NAME in $CASES; do
         ARGS=(analyze "$CORE" -o $OUT/$TAG)
         CLOG=$LOGS/matrix/$TAG.console.log
         [ -f "$CLOG" ] && ARGS+=(--console-log "$CLOG")
-        ( cd $CORES && python3 $PROJ/bmccore.py "${ARGS[@]}" ) > $LOG 2>&1
+        ( cd $CORES && python3 $PROJ/coredump-analyze/bmccore.py "${ARGS[@]}" ) > $LOG 2>&1
         RC=$?
         if [ $RC -ne 0 ]; then
             echo "[$TAG] ANALYZE-RC=$RC" | tee -a $LOGS/matrix/summary.log

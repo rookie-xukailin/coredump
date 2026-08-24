@@ -18,7 +18,8 @@ from urllib.parse import urlparse, unquote
 W = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") \
     else "/tmp/coredump_work"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
-PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJ = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "coredump-analyze")
 sys.path.insert(0, PROJ)
 
 from bmccore import visualize  # noqa: E402

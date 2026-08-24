@@ -4,7 +4,8 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "coredump-analyze"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import make_fake_core as mfc

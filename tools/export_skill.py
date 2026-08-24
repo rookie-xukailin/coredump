@@ -2,15 +2,14 @@
 # -*- coding: utf-8 -*-
 """导出可分发的精简技能包：python3 tools/export_skill.py
 
-整个仓库即技能包（SKILL.md 在根目录，引擎 bmccore.py/bmccore//open/
-随技能自带）。本脚本从仓库组装出**只含运行时文件**的精简包，用于拷入
-各 Agent 的技能目录或经内网分发：
+技能包源目录为仓库内的 coredump-analyze/（自包含：SKILL.md 入口 +
+引擎 bmccore.py/bmccore//open/ + scripts/）。本脚本将其整体复制到
+dist/ 并附加安装说明与用户手册，打成 zip 供内网摆渡：
 
     dist/coredump-analyze/                       ← 文件夹版
-    dist/coredump-analyze-skill-<version>.zip    ← 压缩版（内网摆渡）
+    dist/coredump-analyze-skill-<version>.zip    ← 压缩版
 
-剔除开发资产（.git/tests/tools/docs 其余部分/README），技能加载只认
-SKILL.md，额外文件不影响 Agent，但精简包可避免误改与体积膨胀。
+仓库的开发资产（tests/tools/docs/README 等）不随技能分发。
 """
 import os
 import re
@@ -21,11 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DIST = os.path.join(ROOT, "dist")
 PKG_NAME = "coredump-analyze"
-
-# 精简包内容清单：文件 / 目录（目录递归拷贝，自动剔除 __pycache__）
-FILES = ["SKILL.md", "bmccore.py", "bmccore.toml.example"]
-DIRS = ["bmccore", os.path.join("open", "pyelftools"), "scripts"]
-DOC_FILE = os.path.join("docs", "使用说明.md")
+SRC = os.path.join(ROOT, PKG_NAME)
+DOC_FILE = os.path.join(ROOT, "docs", "使用说明.md")
 
 INSTALL_MD = """# coredump-analyze 技能安装说明
 
@@ -57,8 +53,8 @@ INSTALL_MD = """# coredump-analyze 技能安装说明
 
 
 def read_version():
-    """从 SKILL.md frontmatter 读 version 字段。"""
-    path = os.path.join(ROOT, "SKILL.md")
+    """从技能包 SKILL.md frontmatter 读 version 字段。"""
+    path = os.path.join(SRC, "SKILL.md")
     with open(path, encoding="utf-8") as f:
         m = re.search(r"^version:\s*(\S+)", f.read(), re.M)
     if not m:
@@ -67,40 +63,30 @@ def read_version():
 
 
 def main():
+    if not os.path.isfile(os.path.join(SRC, "SKILL.md")):
+        raise SystemExit("缺少技能包源目录: %s" % SRC)
     version = read_version()
     pkg_dir = os.path.join(DIST, PKG_NAME)
     if os.path.isdir(pkg_dir):
         shutil.rmtree(pkg_dir)
-    os.makedirs(pkg_dir)
+    os.makedirs(DIST, exist_ok=True)
 
-    # 拷贝文件
-    for rel in FILES:
-        src = os.path.join(ROOT, rel)
-        if not os.path.isfile(src):
-            raise SystemExit("缺少文件: %s" % rel)
-        shutil.copy2(src, os.path.join(pkg_dir, rel))
+    # 技能包整体复制（剔除 __pycache__ / 字节码）
+    shutil.copytree(SRC, pkg_dir,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
-    # 拷贝目录（剔除 __pycache__ / 非 .py 资产按需保留）
-    for rel in DIRS:
-        src = os.path.join(ROOT, rel)
-        if not os.path.isdir(src):
-            raise SystemExit("缺少目录: %s" % rel)
-        shutil.copytree(src, os.path.join(pkg_dir, rel),
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-
-    # 使用说明 + 安装说明
+    # 附加：用户手册 + 安装说明
     doc_dst = os.path.join(pkg_dir, "docs")
-    os.makedirs(doc_dst)
-    shutil.copy2(os.path.join(ROOT, DOC_FILE), os.path.join(doc_dst, os.path.basename(DOC_FILE)))
+    os.makedirs(doc_dst, exist_ok=True)
+    shutil.copy2(DOC_FILE, os.path.join(doc_dst, os.path.basename(DOC_FILE)))
     with open(os.path.join(pkg_dir, "INSTALL.md"), "w", encoding="utf-8") as f:
         f.write(INSTALL_MD)
 
     # 压缩包（放 dist/ 下，与文件夹版并列）
     zip_base = os.path.join(DIST, "%s-skill" % PKG_NAME)
     zip_path = shutil.make_archive(zip_base, "zip", root_dir=DIST, base_dir=PKG_NAME)
-    os.rename(zip_path, "%s-v%s.zip" % (zip_base, version))
+    os.replace(zip_path, "%s-v%s.zip" % (zip_base, version))   # 覆盖旧版，支持重跑
 
-    # 汇总
     n_files = sum(len(fs) for _, _, fs in os.walk(pkg_dir))
     print("技能包已导出: %s（%d 个文件）" % (pkg_dir, n_files))
     print("压缩包     : %s-v%s.zip" % (zip_base, version))

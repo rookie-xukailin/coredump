@@ -6,7 +6,7 @@ import sys
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "coredump-analyze"))
 sys.path.insert(0, HERE)
 
 MODULES = ["test_corefile", "test_intake", "test_scan_heap", "test_e2e",
