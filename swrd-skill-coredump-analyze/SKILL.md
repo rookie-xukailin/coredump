@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.7.0
+version: 3.8.0
 ---
 
 # Coredump 智能分析
@@ -105,7 +105,9 @@ offline      = false   # 无交叉工具链设 true（纯Python零外部依赖�
 #                                      # 其下 riscv64-*-gdb 等自动发现配对
 ```
 
-**日常分析就一条短命令**（配置收拢全部参数；CLI 参数仍可临时覆盖配置）：
+**日常分析就一条短命令**（配置收拢全部参数；CLI 参数仍可临时覆盖配置。
+core 也可写进 toml 的 `core =`，那样连位置参数都不用带，换对象时改配置
+或命令行传参均可）：
 
 ```bash
 python3.8 "$BMCORE" analyze <core文件> --config "$WS/bmccore.toml" \

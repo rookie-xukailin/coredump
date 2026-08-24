@@ -72,6 +72,7 @@ class Config(object):
     """全量配置（含默认值）。字段与 CLI 一一对应。"""
 
     def __init__(self):
+        self.core = None             # 待分析 core 路径（可由 toml 指定，CLI 位置参数优先）
         self.symbol_table = None     # 符号表文件/目录的绝对路径（编译阶段单独产出）
         self.source_root = None
         self.sysroot = None
@@ -100,8 +101,8 @@ class Config(object):
         data = load_toml(path)
         top = data.get("", {})
         # 空字符串视为未配置（自带模板 toml 的留空项），对应能力如实降级
-        for k in ("symbol_table", "source_root", "sysroot", "console_log", "exe",
-                  "glibc_version", "output", "workdir"):
+        for k in ("core", "symbol_table", "source_root", "sysroot", "console_log",
+                  "exe", "glibc_version", "output", "workdir"):
             if k in top and top[k] and getattr(self, k) is None:
                 setattr(self, k, top[k])
         if "format" in top:

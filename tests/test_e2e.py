@@ -192,6 +192,30 @@ def test_toolchain_path_discovery():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_core_from_toml():
+    """core 路径进 bmccore.toml：analyze 无位置参数，仅 --config 即可跑。"""
+    tmp = tempfile.mkdtemp()
+    try:
+        core_path, art = _build_arm64_env(tmp)
+        toml = os.path.join(tmp, "bmccore.toml")
+        outdir = os.path.join(tmp, "o")
+        with io.open(toml, "w", encoding="utf-8") as f:
+            f.write('core = "%s"\noutput = "%s"\n' % (core_path, outdir))
+        from bmccore.cli import main
+        rc = main(["analyze", "--config", toml])
+        assert rc == 0
+        assert any(n.endswith("_report.md") for n in os.listdir(outdir)), \
+            "core 完全来自 toml 时应正常产出报告"
+
+        # 都不给时明确报错而不是崩溃
+        rc2 = main(["analyze", "--config",
+                    os.path.join(tmp, "nonexistent.toml")])
+        assert rc2 == 2
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

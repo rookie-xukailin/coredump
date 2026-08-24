@@ -3,6 +3,9 @@
 #
 # 所有路径填绝对路径；暂不用的项留空("")即可，引擎会跳过对应能力。
 
+core         = ""     # 待分析的 core 包路径（留空=每次命令行传；填了则命令连 core 参数都不用带，
+                      # 换分析对象时改这里或命令行传参覆盖均可）
+
 symbol_table = ""     # 符号表：目录 / 单个 ELF / rootfs_symbol.tgz 包（tar 包自动解压缓存）
 source_root  = ""     # 工程源码树根（"为什么崩"的根因分析必需）
 sysroot      = ""     # 固件 staging rootfs（可选；so 路径兜底 + libc 识别）

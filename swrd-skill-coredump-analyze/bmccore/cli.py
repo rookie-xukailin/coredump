@@ -66,8 +66,9 @@ def _expand_symbol_archive(path, workdir, log):
 
 def _load_config(args):
     cfg = Config()
+    core_hint = getattr(args, "core", None)
     path = getattr(args, "config", None) or cfg.find_config_file(
-        os.path.dirname(os.path.abspath(args.core)) if hasattr(args, "core") else None)
+        os.path.dirname(os.path.abspath(core_hint)) if core_hint else None)
     if path and os.path.isfile(path):
         cfg.update_from_toml(path)
     cfg.update_from_cli(args)
@@ -83,11 +84,17 @@ def _fmt_size(n):
 
 
 def cmd_info(args):
-    workdir = getattr(args, "workdir", None) or _load_config(args).workdir
+    cfg = _load_config(args)
+    core_arg = args.core or cfg.core      # 注意：下方局部变量 core 会被 CoreFile 复用
+    if not core_arg:
+        print("错误: 未指定 core 文件（位置参数，或 bmccore.toml 的 core=）",
+              file=sys.stderr)
+        return 2
+    workdir = getattr(args, "workdir", None) or cfg.workdir
     if workdir:
         workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
         os.makedirs(workdir, exist_ok=True)
-    res = intake(args.core, keep_temp=args.keep_temp, workroot=workdir)
+    res = intake(core_arg, keep_temp=args.keep_temp, workroot=workdir)
     try:
         from bmccore.corefile import CoreFile
         from bmccore.modules import group_modules
@@ -98,7 +105,7 @@ def cmd_info(args):
         print("core 概览")
         print("=" * 62)
         print("  输入        : %s (%s)" % (res.source_name,
-                                           _fmt_size(os.path.getsize(args.core))))
+                                           _fmt_size(os.path.getsize(core_arg))))
         if res.meta:
             print("  文件名信息  : seq=%s stamp=%s 进程=%s pid=%s" % (
                 res.meta.get("seq"), res.meta.get("stamp"),
@@ -142,19 +149,24 @@ def cmd_analyze(args):
             print(msg, file=sys.stderr)
 
     cfg = _load_config(args)
+    core = args.core or cfg.core
+    if not core:
+        print("错误: 未指定 core 文件（位置参数，或 bmccore.toml 的 core=）",
+              file=sys.stderr)
+        return 2
     workdir = getattr(args, "workdir", None) or cfg.workdir
     if workdir:
         workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
         os.makedirs(workdir, exist_ok=True)
     if cfg.symbol_table:
         cfg.symbol_table = _expand_symbol_archive(cfg.symbol_table, workdir, log)
-    res = intake(args.core, keep_temp=True, workroot=workdir)
+    res = intake(core, keep_temp=True, workroot=workdir)
     try:
         pipe = Pipeline(res.core_path, cfg, log=log)
         results = pipe.run()
         rep = build_report(results, cfg, res.meta, res.source_name)
 
-        outdir = cfg.output or os.path.join(os.path.dirname(os.path.abspath(args.core)),
+        outdir = cfg.output or os.path.join(os.path.dirname(os.path.abspath(core)),
                                             "bmccore_report")
         stem = os.path.splitext(res.source_name)[0]
         if stem.endswith(".tar"):
@@ -194,12 +206,14 @@ def main(argv=None):
                              "不存在则创建；请用绝对路径，默认系统临时目录）")
 
     p_info = sub.add_parser("info", parents=[common], help="快速摘要：架构/信号/线程/模块")
-    p_info.add_argument("core", help="core 文件或 tar.gz 包")
+    p_info.add_argument("core", nargs="?", default=None,
+                        help="core 文件或 tar.gz 包（不填则用 bmccore.toml 的 core=）")
     p_info.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
     p_info.set_defaults(func=cmd_info)
 
     p_an = sub.add_parser("analyze", parents=[common], help="全量分析并输出报告")
-    p_an.add_argument("core", help="core 文件或 tar.gz 包")
+    p_an.add_argument("core", nargs="?", default=None,
+                      help="core 文件或 tar.gz 包（不填则用 bmccore.toml 的 core=）")
     p_an.add_argument("--symbol-table", metavar="PATH",
                       help="符号表文件或目录的绝对路径（编译阶段单独产出的 ELF/"
                            "符号表文件，含 build-id+symtab+DWARF）；也支持 "

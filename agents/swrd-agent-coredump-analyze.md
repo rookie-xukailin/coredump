@@ -53,6 +53,8 @@ WS="<技能根目录>/workspace"
 
 python3.8 "$BMCORE" analyze <core文件> --config "$WS/bmccore.toml" \
     [--console-log <串口日志>]
+# core 也可写进 toml 的 core=（分析当前对象时命令连位置参数都不用带；
+# 位置参数优先于配置）
 ```
 
 （报告在 `$WS/report/` 下。）
