@@ -65,7 +65,8 @@ class Toolchain(object):
         return bool(self.tools.get(name))
 
     def __repr__(self):
-        return "<Toolchain %s %s>" % (self.arch_name, self.tools)
+        return "<Toolchain %s %s 来源: %s>" % (self.arch_name, self.tools,
+                                               self.source)
 
 
 def _which(name):
