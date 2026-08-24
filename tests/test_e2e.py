@@ -305,6 +305,30 @@ def test_config_fallback_to_workspace_template():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_config_merge_two_tomls():
+    """就近 toml 与技能 workspace 模板按键合并：就近优先、模板补缺。"""
+    from bmccore.config import Config
+    tmp = tempfile.mkdtemp()
+    try:
+        near = os.path.join(tmp, "bmccore.toml")
+        with io.open(near, "w", encoding="utf-8") as f:
+            f.write('symbol_table = "/near/sym"\noffline = false\n')
+        ws = os.path.join(tmp, "ws.toml")
+        with io.open(ws, "w", encoding="utf-8") as f:
+            f.write('source_root = "/ws/src"\noffline = true\n'
+                    '[toolchain.riscv64]\npath = "/ws/tc"\n')
+        cfg = Config()
+        cfg.update_from_toml(near)
+        cfg.update_from_toml(ws)              # 低优先级补缺
+        assert cfg.symbol_table == "/near/sym"     # 就近优先
+        assert cfg.source_root == "/ws/src"        # 模板补缺生效
+        assert cfg.toolchain["riscv64"]["path"] == "/ws/tc"
+        assert cfg.offline is False                # 先见者优先，模板不得翻转
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

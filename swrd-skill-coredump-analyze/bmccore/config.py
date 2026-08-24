@@ -78,6 +78,8 @@ class Config(object):
 
     def __init__(self):
         self.config_path = None     # 实际加载的 bmccore.toml 路径（日志展示用）
+        self.config_extra = None    # 低优先级补缺加载的第二个 toml（技能模板）
+        self._toml_seen = set()     # 已被 toml 显式设定过的标量键（多文件先见优先）
         self.core = None             # 待分析 core 路径（可由 toml 指定，CLI 位置参数优先）
         self.symbol_table = None     # 符号表文件/目录的绝对路径（编译阶段单独产出）
         self.source_root = None
@@ -107,29 +109,36 @@ class Config(object):
     def update_from_toml(self, path):
         data = load_toml(path)
         top = data.get("", {})
-        # 空字符串视为未配置（自带模板 toml 的留空项），对应能力如实降级
+        # 空字符串视为未配置（自带模板 toml 的留空项），对应能力如实降级；
+        # 多文件合并时先见者优先（就近 toml > 技能 workspace 模板）
         for k in ("core", "symbol_table", "source_root", "sysroot", "console_log",
                   "exe", "glibc_version", "output", "workdir"):
-            if k in top and top[k] and getattr(self, k) is None:
+            if k in top and top[k] and k not in self._toml_seen:
                 setattr(self, k, top[k])
-        if "format" in top:
-            self.fmt = top["format"]
-        if "offline" in top:
-            self.offline = bool(top["offline"])
-        if "crash_thread_only" in top:
-            self.crash_thread_only = bool(top["crash_thread_only"])
-        if "lock_scan_full" in top:
-            self.lock_scan_full = bool(top["lock_scan_full"])
-        if "max_scan_depth" in top:
-            self.max_scan_depth = int(top["max_scan_depth"])
+                self._toml_seen.add(k)
+        for k in ("format", "offline", "crash_thread_only", "lock_scan_full",
+                  "max_scan_depth"):
+            if k in top and k not in self._toml_seen:
+                self._toml_seen.add(k)
+                if k == "format":
+                    self.fmt = top[k]
+                elif k == "max_scan_depth":
+                    self.max_scan_depth = int(top[k])
+                else:
+                    setattr(self, k, bool(top[k]))
         tc = data.get("toolchain", {})
         if isinstance(tc, dict):
             for k, v in tc.items():
                 if isinstance(v, dict):
-                    self.toolchain.setdefault(k, {}).update(v)
+                    dst = self.toolchain.setdefault(k, {})
+                    for kk, vv in v.items():
+                        if kk not in dst:      # 先加载的文件优先，后加载只补缺
+                            dst[kk] = vv
         mods = data.get("module", {})
         if isinstance(mods, dict):
-            self.modules.update(mods)
+            for k, v in mods.items():
+                if k not in self.modules:
+                    self.modules[k] = v
 
     def update_from_cli(self, args):
         mapping = {

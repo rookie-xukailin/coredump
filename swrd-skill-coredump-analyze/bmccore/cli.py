@@ -71,8 +71,15 @@ def _load_config(args):
         os.path.dirname(os.path.abspath(core_hint)) if core_hint else None)
     if path and os.path.isfile(path):
         cfg.update_from_toml(path)
+        cfg.config_path = path
+    # 就近/显式 toml 未覆盖的键，用技能包 workspace 模板补缺（合并而非整份遮蔽）
+    from bmccore.config import _PKG_WORKSPACE_TOML
+    if (not cfg.config_path or
+            os.path.abspath(cfg.config_path) != os.path.abspath(_PKG_WORKSPACE_TOML)) \
+            and os.path.isfile(_PKG_WORKSPACE_TOML):
+        cfg.update_from_toml(_PKG_WORKSPACE_TOML)
+        cfg.config_extra = _PKG_WORKSPACE_TOML
     cfg.update_from_cli(args)
-    cfg.config_path = path          # 记录实际加载的配置文件，供启动日志展示
     return cfg
 
 
@@ -155,8 +162,9 @@ def cmd_analyze(args):
         print("错误: 未指定 core 文件（位置参数，或 bmccore.toml 的 core=）",
               file=sys.stderr)
         return 2
-    log("[配置] 加载 %s" % (cfg.config_path or
-                            "无 bmccore.toml（全部走默认/CLI 参数）"))
+    log("[配置] 加载 %s%s" % (
+        cfg.config_path or "无 bmccore.toml",
+        "；技能模板补缺: %s" % cfg.config_extra if cfg.config_extra else ""))
     workdir = getattr(args, "workdir", None) or cfg.workdir
     if workdir:
         workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
