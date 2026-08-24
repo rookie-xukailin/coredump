@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.11.0
+version: 3.11.1
 ---
 
 # Coredump 智能分析

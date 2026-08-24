@@ -196,6 +196,12 @@ def test_toolchain_path_discovery():
         _Cfg.toolchain = {"riscv64": {"path": alt}}
         tc4 = discover("riscv64", _Cfg())
         assert tc4.has("gdb") and "riscv-none-elf-gdb" in tc4.tools["gdb"]
+
+        # 常见笔误：目录路径填进 prefix 键——按目录探测兜底
+        _Cfg.toolchain = {"riscv64": {"prefix": bindir}}
+        tc5 = discover("riscv64", _Cfg())
+        assert tc5.has("gdb") and "riscv64-unknown-linux-gnu-gdb" in \
+            tc5.tools["gdb"]
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

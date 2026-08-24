@@ -128,14 +128,26 @@ def discover(arch_name, config=None):
                     notes.append("前缀路径 %s 自动发现" % p_path)
     if tc_cfg.get("prefix") and not offline:
         pfx = tc_cfg["prefix"]
-        if pfx.endswith("-"):        # 配置里常见带尾横线的 triple 前缀
-            pfx = pfx[:-1]
-        for t in _TOOLS:
-            if not tools[t]:
-                cand = "%s-%s" % (pfx, t)
-                w = _which(cand)
-                if w:
-                    tools[t] = w
+        if os.path.isdir(os.path.expanduser(str(pfx))):
+            # 常见笔误：把目录路径填进了 prefix（本应填 triple 前缀）——
+            # 按目录探测兜底，而不是拼出 "<目录>-gdb" 静默落空
+            found = _probe_tool_dir(os.path.expanduser(str(pfx)), arch_name)
+            if not any(found.values()):
+                found = _probe_tool_dir(os.path.join(
+                    os.path.expanduser(str(pfx)), "bin"), arch_name)
+            for t, p in found.items():
+                tools[t] = tools[t] or p
+            if any(found.values()):
+                notes.append("prefix=%s 按目录自动发现" % pfx)
+        else:
+            if pfx.endswith("-"):        # 配置里常见带尾横线的 triple 前缀
+                pfx = pfx[:-1]
+            for t in _TOOLS:
+                if not tools[t]:
+                    cand = "%s-%s" % (pfx, t)
+                    w = _which(cand)
+                    if w:
+                        tools[t] = w
 
     # 通用 gdb-multiarch / gdb 兜底（可打开任意架构 core）
     if not any(tools.values()) and not offline:
