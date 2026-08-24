@@ -522,6 +522,59 @@ class Pipeline(object):
                 self._mark("cfi", "skipped", "无 .eh_frame 或展开失败")
 
         # ---- 12. 证据包（evidence pack）：全量证据汇总，LLM/面板共用 ----
+        # 读码清单：纯坐标导航（哪个文件哪一段+为什么要看）——
+        # 业务理解由 LLM 通读源码完成，引擎不做任何语义分析
+        reading_list = []
+        _rl_seen = set()
+
+        def _rl_add(f, ln, why, span=15):
+            base = os.path.basename(f) if f else ""
+            if not base:
+                return
+            for e in reading_list:        # 同文件 3 行内视为同一处，去重
+                if e["file"] == base and abs(e["line"] - ln) <= 3:
+                    return
+            reading_list.append({"file": base, "line": ln,
+                                 "span": [max(1, ln - span), ln + span],
+                                 "why": why})
+
+        if core.crash_thread:
+            for tr in traces:
+                if tr.lwp != core.crash_thread.tid:
+                    continue
+                for fr in tr.frames[:8]:
+                    if fr.loc and ":" in fr.loc:
+                        f, _, ln = fr.loc.rpartition(":")
+                        if ln.isdigit():
+                            _rl_add(f, int(ln), "崩溃链 #%d %s（通读整个函数）"
+                                    % (fr.level, fr.func.split("(")[0]))
+            sr0 = scan_results.get(core.crash_thread.tid)
+            if sr0:
+                for fr in sr0.frames[:8]:
+                    if fr.loc and ":" in fr.loc:
+                        f, _, ln = fr.loc.rpartition(":")
+                        if ln.isdigit():
+                            _rl_add(f, int(ln), "崩溃链（栈扫描）%s" % (
+                                fr.func or ""))
+            for tr in traces:              # 其他线程的业务函数（跳过 ??/libc 帧）
+                if tr.lwp == core.crash_thread.tid:
+                    continue
+                for fr in tr.frames[:4]:
+                    if fr.loc and ":" in fr.loc and "?" not in (fr.func or ""):
+                        f, _, ln = fr.loc.rpartition(":")
+                        if ln.isdigit():
+                            _rl_add(f, int(ln), "线程 %d 的业务函数 %s"
+                                    % (tr.lwp, fr.func.split("(")[0]))
+                        break
+        # 崩溃文件整读条目（LLM 五问的落点）
+        if reading_list:
+            reading_list.append({
+                "file": reading_list[0]["file"], "line": 0, "span": None,
+                "why": "崩溃所在文件——通读全文：函数入口/调用者/共享数据/"
+                       "指针生命周期（配合 SKILL 4a-2 五问）"
+                + ("；重点全局变量：%s" % "、".join(sorted(set(addr_names.values()))[:4])
+                   if addr_names else "")})
+
         evidence = _build_evidence(core, {
             "deepdive": deepdive,
             "framevars": framevars_res,
@@ -537,6 +590,7 @@ class Pipeline(object):
                             for c in conclusions],
             "source_refs": [{"file": f, "line": ln, "real": real}
                             for f, ln, real, _b in snippets],
+            "source_reading_list": reading_list[:12],
         })
 
         return {
@@ -629,6 +683,7 @@ def _build_evidence(core, parts):
                     for ln, txt in (parts.get("console_hits") or [])[:40]],
         "conclusions": parts.get("conclusions"),
         "source_refs": parts.get("source_refs"),
+        "source_reading_list": parts.get("source_reading_list"),
     }
 
 
