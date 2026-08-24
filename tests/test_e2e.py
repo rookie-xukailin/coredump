@@ -292,6 +292,19 @@ def test_toolchain_diagnose():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_config_fallback_to_workspace_template():
+    """core 就近无 toml 时，自动回落技能包自带的 workspace/bmccore.toml。"""
+    from bmccore.config import Config, _PKG_WORKSPACE_TOML
+    assert os.path.isfile(_PKG_WORKSPACE_TOML), "技能包应自带 workspace 模板"
+    tmp = tempfile.mkdtemp()
+    try:
+        assert Config().find_config_file(tmp) == _PKG_WORKSPACE_TOML, \
+            "向上找不到 toml 时应回落技能 workspace 模板"
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

@@ -67,6 +67,11 @@ def load_toml(path):
 
 DEFAULT_CONFIG_NAME = "bmccore.toml"
 
+# 技能包自带的配置模板（bmccore/config.py 上两级即技能根目录）
+_PKG_WORKSPACE_TOML = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "workspace", DEFAULT_CONFIG_NAME)
+
 
 class Config(object):
     """全量配置（含默认值）。字段与 CLI 一一对应。"""
@@ -161,7 +166,13 @@ class Config(object):
                 self.toolchain[arch] = {"prefix": args.toolchain_prefix}
 
     def find_config_file(self, start_dir=None):
-        """从当前目录向上找 bmccore.toml。"""
+        """找 bmccore.toml。优先级：--config 显式指定 > 从 start_dir 向上找就近
+        toml > 技能包自带 workspace/bmccore.toml 模板（用户填路径的那份）。
+
+        最后一级回落是关键：不带 --config 时，core 所在目录链上通常没有
+        toml，而用户填的是技能目录下的 workspace 模板——不回落就等于
+        用户配置从未被加载（曾导致工具链 path 配置"明明配了却不生效"）。
+        """
         d = os.path.abspath(start_dir or os.getcwd())
         while True:
             cand = os.path.join(d, DEFAULT_CONFIG_NAME)
@@ -169,5 +180,8 @@ class Config(object):
                 return cand
             parent = os.path.dirname(d)
             if parent == d:
-                return None
+                break
             d = parent
+        if os.path.isfile(_PKG_WORKSPACE_TOML):
+            return _PKG_WORKSPACE_TOML
+        return None
