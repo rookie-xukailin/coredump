@@ -43,3 +43,6 @@ sysroot = "/home/bmc/build/rootfs"
 
 # 栈扫描最大深度（字节）
 # max_scan_depth = 65536
+
+# 锁扫描全内存盲扫（owner 未知的锁；O(内存) 纯 Python，大 core 极慢，默认快速模式）
+# lock_scan_full = false

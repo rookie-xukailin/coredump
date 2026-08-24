@@ -92,6 +92,7 @@ class Config(object):
         self.max_scan_depth = 65536  # 栈扫描最大深度（字节）
         self.max_frames = 50
         self.debuginfod_url = None   # debuginfod 远程符号服务器
+        self.lock_scan_full = False  # 锁扫描：true=附加 owner 未知的全内存盲扫（O(内存)，大 core 极慢）
         self.viz = False             # 是否启动可视化
         self.viz_port = 8080         # 可视化首选端口
         self.viz_timeout = 0         # 可视化超时（秒）
@@ -111,6 +112,8 @@ class Config(object):
             self.offline = bool(top["offline"])
         if "crash_thread_only" in top:
             self.crash_thread_only = bool(top["crash_thread_only"])
+        if "lock_scan_full" in top:
+            self.lock_scan_full = bool(top["lock_scan_full"])
         if "max_scan_depth" in top:
             self.max_scan_depth = int(top["max_scan_depth"])
         tc = data.get("toolchain", {})

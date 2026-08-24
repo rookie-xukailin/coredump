@@ -14,6 +14,7 @@ workdir      = ""     # 解包/中间产物目录（建议填 <技能根目录>/
 output       = ""     # 报告输出目录（建议填 <技能根目录>/workspace/report；留空=core 旁 bmccore_report/）
 format       = "both" # md / json / both
 offline      = false  # 无交叉工具链改 true（纯 Python 零外部依赖）；配了下方工具链保持 false
+# lock_scan_full = false  # 锁扫描全内存盲扫（owner 未知的锁；O(内存)，大 core 可静默数十分钟，默认快速模式）
 
 # ---- 交叉工具链（推荐：只给一个路径，gdb/addr2line/objdump 在其下自动发现）----
 # [toolchain.riscv64]

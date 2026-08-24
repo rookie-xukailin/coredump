@@ -258,8 +258,9 @@ class Pipeline(object):
         if "locks" in want and len(core.threads) > 1:
             self.log("[锁分析] %d 个线程 ..." % len(core.threads))
             _t0 = time.time()
-            lock_result = lockmon_mod.analyze_locks(core, core.threads,
-                                                    progress=_throttled(self.log))
+            lock_result = lockmon_mod.analyze_locks(
+                core, core.threads, progress=_throttled(self.log),
+                full_scan=getattr(cfg, "lock_scan_full", False))
             self.log("[锁分析] 完成，%d 个活跃锁 / %d 条等待关系（耗时 %.1fs）"
                      % (len(lock_result.locks), len(lock_result.wait_graph),
                         time.time() - _t0))

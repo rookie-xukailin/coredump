@@ -247,9 +247,15 @@ def test_lockmon_find_mutexes():
 
     hits = lockmon.find_mutexes(_C(), [_T()])
     assert any(l.addr == 0x10000000 + 0x100 and l.owner_tid == 4242
-               for l in hits), "伪造 mutex 应被检出"
+               for l in hits), "已知 TID 持有的 mutex 应被快速通道检出"
     assert not any(l.addr == 0x10000000 + 0x200 for l in hits), \
-        "kind 越界干扰项不应误报"
+        "owner 未知的干扰项默认（快速模式）不应检出"
+    assert not any(l.addr == 0x10000000 + 0x108 for l in hits), \
+        "owner 字段误对齐形成的假 mutex（lock=TID、owner=0）不应检出"
+
+    # 全量模式也不应检出 kind 越界的干扰项
+    hits_full = lockmon.find_mutexes(_C(), [_T()], full_scan=True)
+    assert not any(l.addr == 0x10000000 + 0x200 for l in hits_full)
 
 
 def test_cli_info_cmd():
