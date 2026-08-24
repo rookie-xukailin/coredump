@@ -843,9 +843,34 @@ assert(dst + sizeof(pat) <= g_led->curve + sizeof(g_led->curve));
                  "culprit": "肇事代码位置 + ```c 片段```"},
   "fixes": [{"title": "直接修复", "body": "```c\n// diff\n```"}],
   "confidence": [{"level": "确认", "claim": "...", "evidence": "..."}],
-  "gaps": ["证据缺口与补救方式"]
+  "gaps": ["证据缺口与补救方式"],
+  "animation": {
+    "title": "事故还原（动画标题）",
+    "actors": [
+      {"id": "t1", "type": "thread", "label": "业务名（如：配置下发线程）",
+       "emoji": "🧵", "desc": "一句话角色"},
+      {"id": "lk1", "type": "lock", "label": "配置锁", "emoji": "🔒"}
+    ],
+    "steps": [
+      {"cap": "通俗字幕：像给不懂代码的人讲故事",
+       "states": {"t1": "run", "lk1": "held:t1"},
+       "arrows": [["t1", "lk1", "拿锁"]]},
+      {"cap": "……最后一步定格", "freeze": true}
+    ]
+  }
 }
 ```
+
+**animation 分镜规范（第 3 节动画的唯一数据源，建议必写）**：
+- 目标：让**不懂代码的人 30 秒看懂事故**——字幕说人话，禁止术语裸奔
+- actors：type=`thread|lock|object`（线程排在舞台上方、锁/对象在下方），
+  label 用业务名不用函数名，emoji 可选（默认 🧵/📦）
+- steps（≤10 步，每步一个动作）：`cap` 通俗字幕（必填）；`states` 演员状态
+  ——线程 `run|wait|dead|sleep|fire`，锁/对象 `held:<持有者id>`（状态跨步
+  持续到被改）；`arrows` `[[from,to,"标签"]]` 本步箭头（标"互等"自动变红）；
+  `ring:true` 死锁环高亮；`freeze:true` 定格为 core 现场（收尾用）
+- 分镜素材直接来自六步法第 1/2/5 步（角色表/业务场景/因果链）——
+  因果链的每个分句通常就是一步
 
 渲染 HTML（你不写 HTML，只写 JSON；报告落在 workspace/report/）：
 

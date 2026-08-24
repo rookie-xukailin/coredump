@@ -132,6 +132,27 @@ def check(narr):
         warns.append("confidence 为空（应逐条标注可信度）")
     if not (narr.get("thread_roles") or []):
         warns.append("thread_roles 为空（多线程场景应有线程角色表）")
+    anim = narr.get("animation")
+    if anim is None:
+        warns.append("animation 缺失（建议提供分镜：事故还原动画，通俗易懂）")
+    else:
+        if not (anim.get("actors") or []):
+            warns.append("animation.actors 为空（应有演员表：线程/锁/对象）")
+        steps = anim.get("steps") or []
+        if not steps:
+            warns.append("animation.steps 为空（至少 1 步分镜）")
+        elif len(steps) > 10:
+            warns.append("animation.steps 有 %d 步（超过 10 步建议精简）" % len(steps))
+        actor_ids = set(a.get("id") for a in anim.get("actors") or [])
+        for i, st in enumerate(steps):
+            if not st.get("cap"):
+                warns.append("animation.steps[%d] 缺 cap（通俗字幕）" % i)
+            for key in (st.get("states") or {}):
+                if key not in actor_ids:
+                    warns.append("animation.steps[%d].states 引用未知演员 %r" % (i, key))
+            for ar in (st.get("arrows") or []):
+                if len(ar) >= 2 and (ar[0] not in actor_ids or ar[1] not in actor_ids):
+                    warns.append("animation.steps[%d].arrows 引用未知演员 %r→%r" % (i, ar[0], ar[1]))
     return errors, warns
 
 
@@ -198,6 +219,10 @@ def render(narr, engine=None, case=None):
 
     with open(_TMPL, encoding="utf-8") as f:
         html = f.read()
+    anim = narr.get("animation")
+    anim_json = json.dumps(anim if isinstance(anim, dict) else {"absent": True},
+                           ensure_ascii=False)
+    anim_json = anim_json.replace("</", "<\\/")     # 防 </script> 提前终止
     subs = {
         "__CASE__": _esc(case),
         "__DATE__": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -211,6 +236,7 @@ def render(narr, engine=None, case=None):
         "__CONFIDENCE__": conf_html,
         "__GAPS__": gaps_html,
         "__EVIDENCE__": "\n".join(ev_html),
+        "__ANIM_JSON__": anim_json,
     }
     for k, v in subs.items():
         html = html.replace(k, v)

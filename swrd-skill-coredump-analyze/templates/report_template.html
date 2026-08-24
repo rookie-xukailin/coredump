@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>__CASE__ · Coredump 分析报告</title>
+<!--
+  章节结构已固化（9 节，改动需评审）：1 TL;DR / 2 现场还原 / 3 事故还原动画
+  / 4 线程角色 / 5 根因分析 / 6 修复建议 / 7 置信度 / 8 证据缺口 / 9 证据链。
+  第 3 节由 narrative.animation 分镜驱动（LLM 按 SKILL 六步法产出），
+  纯内联 JS/SVG 播放，无外部依赖，离线自包含。
+-->
 <style>
   :root { --ink:#1c2733; --sub:#5b6b7b; --line:#dfe6ee; --bg:#f4f7fa;
           --card:#ffffff; --acc:#0f6cbd; --bad:#c0392b; --warn:#b7791f; --ok:#1e7e34; }
@@ -49,6 +55,59 @@
   footer { color:var(--sub); font-size:12.5px; text-align:center; margin-top:8px; }
   @media print { body { background:#fff; } section.card { break-inside:avoid;
                  border:none; padding:8px 0; } header.hero { border-radius:0; } }
+
+  /* ── 第 3 节：事故还原动画 ── */
+  .anim-stage { position:relative; border:1px solid var(--line); border-radius:10px;
+                background:linear-gradient(180deg,#f8fbfe 0%,#eef4fa 100%);
+                padding:18px 14px 12px; min-height:300px; overflow:hidden; }
+  .anim-row { display:flex; justify-content:space-around; flex-wrap:wrap; gap:10px; }
+  .anim-row + .anim-row { margin-top:64px; }
+  .actor { position:relative; z-index:2; min-width:120px; max-width:170px; padding:10px 12px;
+           border:2px solid #b8c6d6; border-radius:10px; background:#fff; text-align:center;
+           transition:all .5s ease; box-shadow:0 1px 3px rgba(18,49,79,.08); }
+  .actor .em { font-size:24px; line-height:1.2; }
+  .actor .nm { font-weight:600; font-size:13.5px; }
+  .actor .ds { color:var(--sub); font-size:11.5px; line-height:1.4; margin-top:2px; }
+  .actor .badge-lock { display:none; position:absolute; top:-11px; right:-8px;
+                       font-size:10.5px; padding:1px 8px; border-radius:999px;
+                       color:#fff; white-space:nowrap; }
+  .actor.st-run { border-color:#0f6cbd; box-shadow:0 0 0 3px rgba(15,108,189,.18); }
+  .actor.st-run .em { animation:anim-bounce 1.1s infinite; }
+  .actor.st-wait { border-color:var(--warn); }
+  .actor.st-wait .em { animation:anim-wobble 1s infinite; }
+  .actor.st-dead { border-color:var(--bad); filter:grayscale(.7);
+                   box-shadow:0 0 0 4px rgba(192,57,43,.22); }
+  .actor.st-sleep { opacity:.55; }
+  .actor.st-fire { border-color:#d97706; box-shadow:0 0 0 4px rgba(217,119,6,.25); }
+  .actor.is-held { border-width:2px; }
+  @keyframes anim-bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+  @keyframes anim-wobble { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-7deg)} 75%{transform:rotate(7deg)} }
+  .anim-svg { position:absolute; inset:0; width:100%; height:100%; z-index:1;
+              pointer-events:none; }
+  .anim-cap { margin:12px 2px 4px; font-size:16.5px; font-weight:600; min-height:30px;
+              transition:opacity .3s; }
+  .anim-cap .stepno { color:var(--sub); font-weight:400; font-size:13px; margin-right:8px; }
+  .anim-ctl { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .anim-ctl button { border:1px solid var(--acc); background:#fff; color:var(--acc);
+                     border-radius:7px; padding:5px 14px; font-size:14px; cursor:pointer; }
+  .anim-ctl button:hover { background:#eaf3fb; }
+  .anim-ctl button.on { background:var(--acc); color:#fff; }
+  .anim-ctl select { border:1px solid var(--line); border-radius:6px; padding:4px 6px; }
+  .anim-dots { display:flex; gap:6px; margin-left:auto; align-items:center; }
+  .anim-dots i { width:9px; height:9px; border-radius:50%; background:#c6d4e2;
+                 cursor:pointer; transition:all .25s; }
+  .anim-dots i.done { background:var(--acc); }
+  .anim-dots i.cur { transform:scale(1.45); background:var(--bad); }
+  .anim-ring-note { display:none; position:absolute; z-index:3; left:50%; top:46%;
+                    transform:translate(-50%,-50%); font-size:20px; font-weight:700;
+                    color:var(--bad); background:rgba(255,255,255,.92); border:2px solid var(--bad);
+                    padding:8px 22px; border-radius:10px; animation:anim-pulse 1s infinite; }
+  .anim-freeze { display:none; position:absolute; inset:0; z-index:4;
+                 background:rgba(210,230,248,.55); backdrop-filter:grayscale(.5);
+                 align-items:center; justify-content:center; font-size:19px;
+                 font-weight:700; color:#12314f; text-shadow:0 1px 0 #fff; }
+  @keyframes anim-pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+  .anim-absent { color:var(--sub); font-size:14px; }
 </style>
 </head>
 <body>
@@ -71,36 +130,240 @@ __SCENE__
 </section>
 
 <section class="card">
-  <h2>3. 线程角色与分工</h2>
+  <h2>3. 事故还原动画（30 秒看懂发生了什么）</h2>
+  <div id="animRoot"></div>
+</section>
+
+<section class="card">
+  <h2>4. 线程角色与分工</h2>
 __THREAD_ROLES__
 </section>
 
 <section class="card">
-  <h2>4. 根因分析</h2>
+  <h2>5. 根因分析</h2>
 __ROOT_CAUSE__
 </section>
 
 <section class="card">
-  <h2>5. 修复建议</h2>
+  <h2>6. 修复建议</h2>
 __FIXES__
 </section>
 
 <section class="card">
-  <h2>6. 置信度评估</h2>
+  <h2>7. 置信度评估</h2>
 __CONFIDENCE__
 </section>
 
 <section class="card">
-  <h2>7. 证据缺口（如实声明）</h2>
+  <h2>8. 证据缺口（如实声明）</h2>
 __GAPS__
 </section>
 
 <section class="card">
-  <h2>8. 证据链（引擎原始取证）</h2>
+  <h2>9. 证据链（引擎原始取证）</h2>
 __EVIDENCE__
 </section>
 
-<footer>由 swrd-skill-coredump-analyze 生成 · __DATE__ · 叙事由 AI 基于引擎证据与源码分析产出，采信前请核对第 8 节原始证据</footer>
+<footer>由 swrd-skill-coredump-analyze 生成 · __DATE__ · 叙事由 AI 基于引擎证据与源码分析产出，采信前请核对第 9 节原始证据</footer>
 </div>
+
+<script>
+/* ── 第 3 节播放器：narrative.animation 分镜 → SVG 动画 ── */
+(function () {
+  var A = __ANIM_JSON__;
+  var root = document.getElementById("animRoot");
+  if (!A || A.absent || !A.actors || !A.steps || !A.steps.length) {
+    root.innerHTML = "<p class='anim-absent'>（叙事未提供动画分镜——补写 narrative.animation "
+      + "后重新渲染，此处将播放事故还原动画）</p>";
+    return;
+  }
+  var PALETTE = ["#0f6cbd", "#7c3aed", "#0e7490", "#b7791f", "#be185d", "#1e7e34"];
+  var colors = {};
+  A.actors.forEach(function (a, i) { colors[a.id] = PALETTE[i % PALETTE.length]; });
+
+  /* 舞台骨架 */
+  var stage = document.createElement("div");
+  stage.className = "anim-stage";
+  var rows = { thread: [], other: [] };
+  A.actors.forEach(function (a) {
+    (a.type === "thread" ? rows.thread : rows.other).push(a);
+  });
+  ["thread", "other"].forEach(function (rk) {
+    if (!rows[rk].length) return;
+    var r = document.createElement("div");
+    r.className = "anim-row";
+    rows[rk].forEach(function (a) {
+      var d = document.createElement("div");
+      d.className = "actor";
+      d.id = "an-" + a.id;
+      d.innerHTML = '<div class="em">' + (a.emoji || (a.type === "thread" ? "🧵" : "📦"))
+        + '</div><div class="nm">' + a.label + '</div>'
+        + (a.desc ? '<div class="ds">' + a.desc + "</div>" : "")
+        + '<span class="badge-lock"></span>';
+      d.style.borderColor = "#b8c6d6";
+      r.appendChild(d);
+    });
+    stage.appendChild(r);
+  });
+  var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "anim-svg");
+  stage.appendChild(svg);
+  var ringNote = document.createElement("div");
+  ringNote.className = "anim-ring-note";
+  ringNote.textContent = "⛔ 死锁环！";
+  stage.appendChild(ringNote);
+  var freeze = document.createElement("div");
+  freeze.className = "anim-freeze";
+  freeze.textContent = "🧊 这就是 core 里的现场（进程定格）";
+  stage.appendChild(freeze);
+
+  var cap = document.createElement("div");
+  cap.className = "anim-cap";
+  var ctl = document.createElement("div");
+  ctl.className = "anim-ctl";
+  var dots = document.createElement("div");
+  dots.className = "anim-dots";
+  root.appendChild(stage); root.appendChild(cap); root.appendChild(ctl); root.appendChild(dots);
+
+  /* 控件 */
+  function btn(t, fn) {
+    var b = document.createElement("button");
+    b.textContent = t; b.onclick = fn; ctl.appendChild(b); return b;
+  }
+  var bPlay = btn("▶ 播放", toggle), bPrev = btn("◀ 上一步", function () { go(idx - 1); }),
+      bNext = btn("下一步 ▶", function () { go(idx + 1); }),
+      bRe = btn("⟲ 重播", function () { go(-1, true); play(); });
+  var sp = document.createElement("select");
+  [["0.5×", 0.5], ["1×", 1], ["2×", 2]].forEach(function (p) {
+    var o = document.createElement("option");
+    o.value = p[1]; o.textContent = p[0]; sp.appendChild(o);
+  });
+  sp.onchange = function () { speed = parseFloat(sp.value); if (timer) { stop(); play(); } };
+  ctl.appendChild(sp);
+  A.steps.forEach(function (_, i) {
+    var d = document.createElement("i");
+    d.onclick = function () { go(i); };
+    dots.appendChild(d);
+  });
+
+  var idx = -1, timer = null, speed = 1;
+  var merged = {};
+  var STEP_MS = 2400;
+
+  function anchor(el) {
+    var st = stage.getBoundingClientRect(), r = el.getBoundingClientRect();
+    return { x: r.left - st.left + r.width / 2, y: r.top - st.top + r.height / 2 };
+  }
+  function drawArrows(list) {
+    svg.innerHTML = "";
+    (list || []).forEach(function (ar) {
+      var from = document.getElementById("an-" + ar[0]),
+          to = document.getElementById("an-" + ar[1]);
+      if (!from || !to) return;
+      var a = anchor(from), b = anchor(to);
+      var sameRow = Math.abs(a.y - b.y) < 40;
+      var mx = (a.x + b.x) / 2, my = sameRow ? a.y - 55 : (a.y + b.y) / 2;
+      var dead = (ar[2] || "").indexOf("互等") >= 0;
+      var col = dead ? "#c0392b" : (colors[ar[0]] || "#0f6cbd");
+      var p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", "M" + a.x + "," + a.y + " Q" + mx + "," + my + " " + b.x + "," + b.y);
+      p.setAttribute("fill", "none"); p.setAttribute("stroke", col);
+      p.setAttribute("stroke-width", dead ? 2.6 : 1.8);
+      p.setAttribute("stroke-dasharray", "7 5");
+      p.setAttribute("marker-end", "url(#ah)");
+      p.setAttribute("opacity", ".9");
+      svg.appendChild(p);
+      if (ar[2]) {
+        var t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("x", mx); t.setAttribute("y", my - 6);
+        t.setAttribute("text-anchor", "middle");
+        t.setAttribute("font-size", "12.5");
+        t.setAttribute("font-weight", "600");
+        t.setAttribute("fill", col);
+        t.setAttribute("paint-order", "stroke");
+        t.setAttribute("stroke", "#fff"); t.setAttribute("stroke-width", "4");
+        t.textContent = ar[2];
+        svg.appendChild(t);
+      }
+    });
+    var defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    defs.innerHTML = '<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" '
+      + 'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+      + '<path d="M0,0 L10,5 L0,10 z" fill="#5b6b7b"/></marker>';
+    svg.insertBefore(defs, svg.firstChild);
+  }
+  function applyStates() {
+    A.actors.forEach(function (a) {
+      var el = document.getElementById("an-" + a.id);
+      if (!el) return;
+      var st = merged[a.id] || "";
+      el.className = "actor" + (st && st.indexOf("held:") !== 0 ? " st-" + st : "");
+      var bl = el.querySelector(".badge-lock");
+      if (st.indexOf("held:") === 0) {
+        var owner = st.slice(5);
+        var oa = A.actors.filter(function (x) { return x.id === owner; })[0];
+        el.classList.add("is-held");
+        el.style.borderColor = colors[owner] || "#0f6cbd";
+        el.style.boxShadow = "0 0 0 3px " + (colors[owner] || "#0f6cbd") + "33";
+        bl.style.display = "block";
+        bl.style.background = colors[owner] || "#0f6cbd";
+        bl.textContent = "🔒 " + (oa ? oa.label : owner);
+      } else {
+        el.style.borderColor = ""; el.style.boxShadow = "";
+        bl.style.display = "none";
+      }
+    });
+  }
+  function go(i, noApply) {
+    if (i < -1 || i >= A.steps.length) { stop(); return; }
+    while (idx > i) {                     // 回退时重放累积态
+      var st = A.steps[idx].states || {};
+      Object.keys(st).forEach(function (k) { delete merged[k]; });
+      for (var j = 0; j <= i; j++) {
+        var s2 = A.steps[j].states || {};
+        Object.keys(s2).forEach(function (k) { merged[k] = s2[k]; });
+      }
+      idx = i; break;
+    }
+    idx = i;
+    var step = A.steps[idx];
+    if (!noApply && step) {
+      var st = step.states || {};
+      Object.keys(st).forEach(function (k) { merged[k] = st[k]; });
+    }
+    applyStates();
+    drawArrows(step ? step.arrows : null);
+    ringNote.style.display = step && step.ring ? "block" : "none";
+    freeze.style.display = step && step.freeze ? "flex" : "none";
+    cap.innerHTML = step
+      ? '<span class="stepno">第 ' + (idx + 1) + "/" + A.steps.length + " 步</span>" + step.cap
+      : "按 ▶ 播放事故还原…";
+    [].forEach.call(dots.children, function (d, j) {
+      d.className = j < idx ? "done" : j === idx ? "cur" : "";
+    });
+  }
+  function play() {
+    stop();
+    if (idx >= A.steps.length - 1) idx = -1, merged = {};
+    bPlay.textContent = "⏸ 暂停";
+    bPlay.classList.add("on");
+    go(idx < 0 ? 0 : idx + 1);
+    timer = setInterval(function () {
+      if (idx >= A.steps.length - 1) { stop(); return; }
+      go(idx + 1);
+    }, STEP_MS / speed);
+  }
+  function stop() {
+    if (timer) clearInterval(timer);
+    timer = null;
+    bPlay.textContent = "▶ 播放";
+    bPlay.classList.remove("on");
+  }
+  function toggle() { timer ? stop() : play(); }
+
+  go(-1, true);
+  setTimeout(play, 700);                  // 载入即自动播一遍
+})();
+</script>
 </body>
 </html>
