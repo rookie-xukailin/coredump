@@ -10,6 +10,7 @@
 内存），后续同产物查询走缓存。
 """
 import bisect
+import os
 
 from elftools.elf.elffile import ELFFile
 
@@ -22,7 +23,7 @@ def _basename(name):
     return name.rsplit("/", 1)[-1]
 
 
-def _build(path):
+def _build(path, progress=None):
     addrs, rows = [], []
     try:
         f = open(path, "rb")
@@ -34,7 +35,12 @@ def _build(path):
             if not elf.has_dwarf_info():
                 return addrs, rows
             dw = elf.get_dwarf_info()
+            n_cu = 0
             for cu in dw.iter_CUs():
+                n_cu += 1
+                if progress and n_cu % 50 == 0:
+                    progress("[行号] %s 已解析 %d 个 CU"
+                             % (os.path.basename(path), n_cu))
                 try:
                     lp = dw.line_program_for_CU(cu)
                 except Exception:
@@ -62,10 +68,10 @@ def _build(path):
     return ([addrs[i] for i in order], [rows[i] for i in order])
 
 
-def lookup(path, addr):
+def lookup(path, addr, progress=None):
     """addr 为产物内相对地址；命中返回 'base.c:123'，否则 None。"""
     if path not in _cache:
-        _cache[path] = _build(path)
+        _cache[path] = _build(path, progress)
     sa, rr = _cache[path]
     if not sa:
         return None
@@ -78,11 +84,11 @@ def lookup(path, addr):
     return "%s:%d" % (name, line)
 
 
-def resolve(path, addrs):
+def resolve(path, addrs, progress=None):
     """批量：{相对地址: 'base.c:123'}（无行号信息的地址不出现在结果里）。"""
     out = {}
     for a in addrs:
-        loc = lookup(path, a)
+        loc = lookup(path, a, progress)
         if loc:
             out[a] = loc
     return out

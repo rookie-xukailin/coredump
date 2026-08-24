@@ -88,11 +88,15 @@ def read_artifact_info(path):
         return None
 
 
-def scan_artifacts(root):
-    """递归扫描符号表目录，返回 Artifact 列表。"""
+def scan_artifacts(root, progress=None):
+    """递归扫描符号表目录，返回 Artifact 列表。
+
+    progress: 可选回调（msg -> None），每 20 个文件上报一次索引进度。
+    """
     arts = []
     if not root or not os.path.isdir(root):
         return arts
+    cands = []
     for dirpath, _dirnames, filenames in os.walk(root):
         for fn in filenames:
             p = os.path.join(dirpath, fn)
@@ -101,13 +105,17 @@ def scan_artifacts(root):
                     continue
             except OSError:
                 continue
-            info = read_artifact_info(p)
-            if info:
-                arts.append(info)
+            cands.append(p)
+    for i, p in enumerate(cands, 1):
+        if progress and (i % 20 == 0 or i == len(cands)):
+            progress("[符号] 已索引 %d/%d 个产物" % (i, len(cands)))
+        info = read_artifact_info(p)
+        if info:
+            arts.append(info)
     return arts
 
 
-def load_symbol_tables(path):
+def load_symbol_tables(path, progress=None):
     """从用户指定的符号表文件或目录加载符号表。
 
     用户的工程在编译阶段用 objcopy --only-keep-debug（或等价方式）把
@@ -123,7 +131,7 @@ def load_symbol_tables(path):
     if os.path.isfile(path):
         info = read_artifact_info(path)
         return [info] if info else []
-    return scan_artifacts(path)
+    return scan_artifacts(path, progress)
 
 
 def match_modules(modules, artifacts, overrides=None, exe_hint=None):

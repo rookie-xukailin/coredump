@@ -19,6 +19,18 @@ from .modules import group_modules
 from .report import Report
 from .source import SourceIndex
 
+def _throttled(log, every=2.0):
+    """进度节流器：每 every 秒最多放行一条（长循环心跳用，避免刷屏）。"""
+    state = {"t": 0.0}
+
+    def beat(msg):
+        now = time.time()
+        if now - state["t"] >= every:
+            state["t"] = now
+            log(msg)
+    return beat
+
+
 ALL_SKILLS = ("symbols", "backtrace", "scan", "heap", "console", "triage",
               "source", "cfi", "locks", "viz")
 
@@ -50,7 +62,8 @@ class Pipeline(object):
         if "symbols" in want:
             if cfg.symbol_table:
                 self.log("[符号] 读取符号表 %s ..." % cfg.symbol_table)
-                artifacts = symbols_mod.load_symbol_tables(cfg.symbol_table)
+                artifacts = symbols_mod.load_symbol_tables(
+                    cfg.symbol_table, progress=_throttled(self.log))
                 modules = group_modules(core)
                 matches = symbols_mod.match_modules(modules, artifacts,
                                                     overrides=cfg.modules)
@@ -121,13 +134,15 @@ class Pipeline(object):
                 # 离线（无 addr2line）：纯 Python 直读 DWARF 行号表
                 from . import linetab
                 _linetab_seen = set()
+                _beat_line = _throttled(self.log)
 
                 def a2l(path, addrs, base):
                     if path not in _linetab_seen:
                         _linetab_seen.add(path)
                         self.log("[行号] 首次解析 %s 行号表（大库需数秒，仅此一次）..."
                                  % os.path.basename(path))
-                    table = linetab.resolve(path, [a - base for a in addrs])
+                    table = linetab.resolve(path, [a - base for a in addrs],
+                                            progress=_beat_line)
                     return {k: ("", v) for k, v in table.items()}
             self.log("[栈扫描] 共 %d 个线程待扫（含行号解析）" % len(threads))
             for t in threads:
@@ -159,7 +174,8 @@ class Pipeline(object):
             _t0 = time.time()
             heap_result = heap_mod.run_heap_skill(core, core.threads, matches,
                                                   victim_addr=victim,
-                                                  reg_ptrs=reg_ptrs)
+                                                  reg_ptrs=reg_ptrs,
+                                                  progress=_throttled(self.log))
             self.log("[堆取证] 完成（耗时 %.1fs）" % (time.time() - _t0))
             self._mark("heap", "ok" if heap_result.has_heap else "skipped",
                        "" if heap_result.has_heap else "core 中无堆数据")

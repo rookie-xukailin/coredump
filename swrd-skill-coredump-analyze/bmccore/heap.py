@@ -86,8 +86,11 @@ def find_heap_regions(core, threads):
 # chunk 链走查
 # ---------------------------------------------------------------------------
 
-def walk_region(region, elfclass):
-    """走查一个堆区。返回 (chunks, corruptions, notes)。"""
+def walk_region(region, elfclass, progress=None):
+    """走查一个堆区。返回 (chunks, corruptions, notes)。
+
+    progress: 可选回调（msg -> None），走查过程定期上报进度。
+    """
     word = 4 if elfclass == 32 else 8
     minsz = _MIN_SIZE[elfclass]
     align = _ALIGN[elfclass]
@@ -101,6 +104,8 @@ def walk_region(region, elfclass):
     guard = 0
     while cur + 2 * word <= end:
         guard += 1
+        if progress and guard % 5000 == 0:
+            progress("[堆] 已走查 %d 个 chunk @+0x%x" % (guard, cur))
         if guard > 200000:
             notes.append("chunk 数量超限，提前终止（可能是误入非堆数据）")
             break
@@ -242,7 +247,7 @@ def find_libc(matches):
 # ---------------------------------------------------------------------------
 
 def run_heap_skill(core, threads, matches, victim_addr=None, ref_radius=64,
-                   reg_ptrs=None):
+                   reg_ptrs=None, progress=None):
     """堆取证主流程。victim_addr 可选（由 triage 或调用方指定受害地址）；
     reg_ptrs 可选（崩溃线程寄存器值列表）：堆头完好但数据被踩（延迟引爆）
     的形态下，用指向堆的寄存器定位受害对象做内容指纹与引用搜索。"""
@@ -264,7 +269,7 @@ def run_heap_skill(core, threads, matches, victim_addr=None, ref_radius=64,
     walked = []                      # (region, chunks, desc)
     for r in heaps:
         desc = "0x%x-0x%x" % (r.vaddr, r.vaddr + r.filesz)
-        chunks, corrs, notes = walk_region(r, core.elfclass)
+        chunks, corrs, notes = walk_region(r, core.elfclass, progress=progress)
         res.notes.extend(notes)
         # 堆区资格判定：glibc 堆起点必是合法 chunk 链。若起点第一个 chunk
         # 头就非法（BSS/数据残留等非堆内存的典型特征），不能按堆损坏上报，
