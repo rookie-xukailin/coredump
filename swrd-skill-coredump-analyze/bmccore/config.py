@@ -28,6 +28,18 @@ def _parse_scalar(s):
         return s
 
 
+def _strip_comment(val):
+    """去掉行内注释：带引号的值取闭合引号前的部分，裸值取 # 之前。"""
+    s = val.lstrip()
+    if s[:1] in ('"', "'"):
+        end = s.find(s[0], 1)
+        if end != -1:
+            return s[:end + 1]
+        return s
+    i = s.find("#")
+    return s[:i].rstrip() if i != -1 else s
+
+
 def load_toml(path):
     """解析 toml 子集，返回 {section: {key: value}}；顶层键放 '' 节。
 
@@ -49,7 +61,7 @@ def load_toml(path):
             if "=" not in line:
                 raise ConfigError("%s:%d 无法解析: %r" % (path, ln, line))
             key, _, val = line.partition("=")
-            cur[key.strip()] = _parse_scalar(val)
+            cur[key.strip()] = _parse_scalar(_strip_comment(val))
     return out
 
 
@@ -87,9 +99,10 @@ class Config(object):
     def update_from_toml(self, path):
         data = load_toml(path)
         top = data.get("", {})
+        # 空字符串视为未配置（自带模板 toml 的留空项），对应能力如实降级
         for k in ("symbol_table", "source_root", "sysroot", "console_log", "exe",
                   "glibc_version", "output", "workdir"):
-            if k in top and getattr(self, k) is None:
+            if k in top and top[k] and getattr(self, k) is None:
                 setattr(self, k, top[k])
         if "format" in top:
             self.fmt = top["format"]

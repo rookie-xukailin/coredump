@@ -65,6 +65,8 @@ INSTALL_MD = """# swrd-skill-coredump-analyze 技能安装说明
   且 python3 ≥3.8 时可用 python3）；
 - 分析默认走 `--offline`（纯 Python，零外部程序调用、零网络请求）；
 - 解包/中间产物/报告统一落在技能目录下 `workspace/`（自动创建，可随时清理）；
+  技能自带 `workspace/bmccore.toml` 模板（变量齐全、路径留空）——填好路径后
+  `analyze <core> --config <技能根目录>/workspace/bmccore.toml` 一条短命令分析；
 - 请勿设置 `DEBUGINFOD_URLS` 环境变量或 bmccore.toml 的 `debuginfod_url`
   （默认关闭；配置后才会按 build-id 发起 HTTP 拉取符号）；
 - 根因分析需要内网可达的符号表与源码树（符号表支持目录/单个 ELF/
@@ -94,8 +96,18 @@ def main():
 
     # 技能包整体复制（剔除 __pycache__ / 字节码）
     shutil.copytree(SRC, pkg_dir,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
-                                                  "workspace"))
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    # workspace 只保留自带模板（bmccore.toml/.gitkeep），剔除本机运行产物
+    ws_dir = os.path.join(pkg_dir, "workspace")
+    if os.path.isdir(ws_dir):
+        for name in os.listdir(ws_dir):
+            if name in ("bmccore.toml", ".gitkeep"):
+                continue
+            p = os.path.join(ws_dir, name)
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                os.remove(p)
 
     # 附加：用户手册 + 配套子代理 + 安装说明
     doc_dst = os.path.join(pkg_dir, "docs")

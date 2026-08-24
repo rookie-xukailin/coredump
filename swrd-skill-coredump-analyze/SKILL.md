@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.5.0
+version: 3.6.0
 ---
 
 # Coredump 智能分析
@@ -19,7 +19,7 @@ version: 3.5.0
 ├── scripts/
 │   └── coredump_analyze.py  ← 报告 JSON → 结构化数据 的辅助脚本
 ├── bmccore.toml.example   ← 配置模板
-└── workspace/             ← 运行时工作区（解包/中间产物/报告，自动创建，可随时清理）
+└── workspace/             ← 工作区（自带 bmccore.toml 配置模板；解包/中间产物/报告也在此）
 ```
 
 **定位技能根目录**：加载技能时系统会告知本 SKILL.md 的路径（base directory），
@@ -87,8 +87,9 @@ BMCORE="<技能根目录>/bmccore.py"    # 技能根目录 = 本 SKILL.md 所在
 WS="<技能根目录>/workspace"
 ```
 
-**首次分析（或路径变化时）先写一次配置** `$WS/bmccore.toml`——之后每次分析
-只需一条短命令，不再拼长参数（所有路径用绝对路径）：
+**首次分析（或路径变化时）填一次配置**——技能自带模板
+`$WS/bmccore.toml`（变量齐全、路径留空），把各项路径填成绝对路径即可；
+之后每次分析只需一条短命令，不再拼长参数：
 
 ```toml
 # <技能根目录>/workspace/bmccore.toml

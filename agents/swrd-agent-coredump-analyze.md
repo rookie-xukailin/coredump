@@ -43,9 +43,9 @@ SKILL.md 的完整方法论（可直接 read_file，或经 use_skill 加载；�
 解释器统一用 `python3.8`（部分机器默认 python3 版本不一；仅当无
 python3.8 可执行文件且默认 python3 已 ≥3.8 时才用 python3）。
 
-**首次**：把 symbol_table/source_root/workdir/output/offline/工具链写进
-`$WS/bmccore.toml`（模板见技能 SKILL.md 第 2 步；所有路径绝对路径），
-此后分析只需短命令（CLI 参数可临时覆盖配置）：
+**首次**：填写技能自带的 `$WS/bmccore.toml` 模板（变量齐全、路径留空，
+全部填绝对路径；含工具链节），此后分析只需短命令
+（CLI 参数可临时覆盖配置）：
 
 ```bash
 BMCORE="<技能根目录>/bmccore.py"     # 均为绝对路径（技能根目录 = base directory）

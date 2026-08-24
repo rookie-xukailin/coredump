@@ -1,0 +1,31 @@
+# bmccore 运行配置模板 —— 把路径填好后，日常分析只需一条短命令：
+#   python3.8 <技能根目录>/bmccore.py analyze <core包> --config 本文件
+#
+# 所有路径填绝对路径；暂不用的项留空("")即可，引擎会跳过对应能力。
+
+symbol_table = ""     # 符号表：目录 / 单个 ELF / rootfs_symbol.tgz 包（tar 包自动解压缓存）
+source_root  = ""     # 工程源码树根（"为什么崩"的根因分析必需）
+sysroot      = ""     # 固件 staging rootfs（可选；so 路径兜底 + libc 识别）
+
+workdir      = ""     # 解包/中间产物目录（建议填 <技能根目录>/workspace/intake）
+output       = ""     # 报告输出目录（建议填 <技能根目录>/workspace/report；留空=core 旁 bmccore_report/）
+format       = "both" # md / json / both
+offline      = false  # 无交叉工具链改 true（纯 Python 零外部依赖）；配了下方工具链保持 false
+
+# ---- 交叉工具链（有则解注释填写；原生 addr2line/gdb 比纯 Python 快且多精确回溯）----
+# [toolchain.riscv64]
+# gdb       = "/opt/xxx/bin/riscv64-unknown-linux-gnu-gdb"
+# addr2line = "/opt/xxx/bin/riscv64-unknown-linux-gnu-addr2line"
+# objdump   = "/opt/xxx/bin/riscv64-unknown-linux-gnu-objdump"
+
+# [toolchain.arm64]
+# prefix = "aarch64-linux-gnu-"        # 前缀方式（需工具链 bin 在 PATH 里）
+
+# [toolchain.arm32]
+# prefix = "arm-linux-gnueabihf-"
+
+# ---- 手动指定某模块符号表（自动配对失败时的逃生门）----
+# [module]
+# libfoo.so = "/绝对路径/libfoo.so.1.2"
+
+# max_scan_depth = 65536   # 栈扫描最大深度（字节）

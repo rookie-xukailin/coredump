@@ -130,6 +130,29 @@ def test_config_toml_short_command():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_shipped_workspace_template():
+    """随包自带的 workspace/bmccore.toml（路径全空）可解析，分析不崩溃、能力如实降级。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    toml = os.path.join(root, "swrd-skill-coredump-analyze", "workspace",
+                        "bmccore.toml")
+    assert os.path.isfile(toml), "技能包应自带 workspace/bmccore.toml 模板"
+    # 模板大量使用行内注释：解析结果必须是干净值（空串/布尔/枚举），不带注释尾巴
+    from bmccore.config import load_toml
+    top = load_toml(toml)[""]
+    assert top.get("symbol_table") == "" and top.get("workdir") == ""
+    assert top.get("offline") is False and top.get("format") == "both"
+    tmp = tempfile.mkdtemp()
+    try:
+        core_path, art = _build_arm64_env(tmp)
+        from bmccore.cli import main
+        rc = main(["analyze", core_path, "--config", toml,
+                   "-o", os.path.join(tmp, "out")])
+        assert rc == 0
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:
