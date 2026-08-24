@@ -72,3 +72,15 @@ python tests/run_all.py          # 系统套件将进程内驱动完整分析流
 | ill_jump.arm32 信号为 SIGTRAP | qemu 对 UDF 的上报与真机不同 | 按当次真实信号断言 |
 | riscv 越文件 EOF 可报 BUS 或 SEGV | qemu 翻译层差异 | 结论关键词双匹配 |
 | dblfree_concurrent 崩溃线程无应用帧 | glibc abort 路径 + qemu clone 线程栈伪影（活体=gcore 一致） | 依据 console glibc 报错断言 |
+
+## 5. 内网同步：每次修改必须向用户报告变更文件清单
+
+本仓库的技能包（`swrd-skill-coredump-analyze/`）与子代理
+（`agents/swrd-agent-coredump-analyze.md`）以**文件拷贝方式**同步到内网，
+内外网无 git 通道。因此**任何一次修改（代码/文档/配置，含小改动）完成时，
+必须向用户明确列出本次变更的文件清单**：
+
+- 逐项列全新增/修改/删除/重命名的文件路径；
+- 注明内网同步建议：需要重新拷贝哪些文件/目录，或建议直接用
+  `python3 tools/export_skill.py` 重新导出 zip 整包同步；
+- 不许只说"已改好"而不给清单。
