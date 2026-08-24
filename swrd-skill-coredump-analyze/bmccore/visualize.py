@@ -112,11 +112,14 @@ def _build_thread_stacks(core, traces, scan_results, resolver_matches=None):
 
 def build_viz_data(core, heap_result=None, matches=None, traces=None,
                    conclusions=None, cfi_frames=None, scan_results=None,
-                   source_root=None, snippets=None):
+                   source_root=None, snippets=None,
+                   deepdive=None, framevars=None, regs_deep=None,
+                   stackdump=None, lock_result=None, addr_names=None):
     signal = core.threads[0].cursig if core.threads else 0
     sig_name = _SIG_NAMES.get(signal, "SIG%d" % signal)
     fault_addr = (core.siginfo or {}).get("addr")
     crash_thread = core.crash_thread
+    addr_names = addr_names or {}
 
     # ── 崩溃故事（递进式） ──
     story_steps = []
@@ -209,9 +212,12 @@ def build_viz_data(core, heap_result=None, matches=None, traces=None,
                 if snippet:
                     crash_line_text = snippet[0][1] if snippet else ""
                     from .vartrace import trace_variable
+                    # 运行时值：来自帧变量恢复（gdb bt full / DIE 参数表）
+                    rt_val = _runtime_ptr_value(framevars, crash_line_text)
                     var_trace, var_root_cause = trace_variable(
                         source_root, file_path, int(line_str),
-                        crash_line_text, fault_addr)
+                        crash_line_text, fault_addr,
+                        runtime_value=rt_val)
                     if var_trace:
                         for ev in var_trace:
                             if ev.get("is_root_cause"):
@@ -302,6 +308,39 @@ def build_viz_data(core, heap_result=None, matches=None, traces=None,
         }
         threads.append(tinfo)
 
+    # ── 深度证据（deepdive/framevars/regs/stackdump/locks）──
+    fv = framevars or None
+    regs = [{"reg": rn, "value": "0x%x" % v, "sem": sem}
+            for rn, v, sem in (regs_deep or [])]
+    sdump = [{"off": off, "addr": "0x%x" % a, "value": "0x%x" % v, "sem": sem}
+             for off, a, v, sem in (stackdump or [])[:48]]
+    disasm = (deepdive or {}).get("disasm") if deepdive else None
+    exprs = [{"expr": e, "out": out[:8]}
+             for e, out in ((deepdive or {}).get("expr_evals") or [])]
+    locks_viz = None
+    if lock_result is not None:
+        locks_viz = {
+            "locks": [{"addr": "0x%x" % lk.addr,
+                       "named": addr_names.get(lk.addr),
+                       "owner": lk.owner_tid, "state": lk.lock_state}
+                      for lk in lock_result.locks[:12]],
+            "waits": [{"waiter": e.waiter_tid, "lock": "0x%x" % e.lock_addr,
+                       "named": addr_names.get(e.lock_addr),
+                       "holder": e.holder_tid}
+                      for e in lock_result.wait_graph[:16]],
+            "deadlocks": [[{"waiter": e.waiter_tid,
+                            "lock": "0x%x" % e.lock_addr,
+                            "holder": e.holder_tid} for e in cycle]
+                          for cycle in (lock_result.deadlocks or [])[:2]],
+            "futex": [{"tid": tid,
+                       "uaddr": ("0x%x" % bp["uaddr"]) if bp.get("uaddr") else "-",
+                       "named": addr_names.get(bp.get("uaddr")) if bp.get("uaddr") else None,
+                       "sys": bp.get("sys", "?")}
+                      for tid, bp in
+                      sorted((getattr(lock_result, "futex_waits", None) or {}).items())
+                      if bp.get("sys") == "futex"][:12],
+        }
+
     return {
         "summary": {
             "signal": sig_name,
@@ -324,7 +363,31 @@ def build_viz_data(core, heap_result=None, matches=None, traces=None,
         "var_root_cause": var_root_cause,
         "conclusions": [{"confidence": c.confidence, "text": c.text,
                          "evidence": c.evidence} for c in (conclusions or [])],
+        "frame_vars": fv,
+        "registers_deep": regs,
+        "stack_dump": sdump,
+        "disasm": disasm,
+        "expr_evals": exprs,
+        "locks": locks_viz,
     }
+
+
+def _runtime_ptr_value(framevars, crash_line):
+    """从帧变量恢复结果取崩溃行被解引用指针的运行时值（int 或 None）。"""
+    import re as _re
+    if not framevars or not crash_line:
+        return None
+    ids = set(_re.findall(r"[A-Za-z_][A-Za-z0-9_]*", crash_line))
+    ids -= {"volatile", "char", "int", "long", "void", "static", "return",
+            "if", "for", "while", "struct", "const", "unsigned", "signed"}
+    for fr in framevars.get("frames", [])[:1]:
+        for var in fr.get("vars", []):
+            if var["name"] in ids:
+                try:
+                    return int(str(var.get("value", "")).split()[0], 0)
+                except (ValueError, IndexError):
+                    return None
+    return None
 
 
 def _build_heap_chunks(heap_result):
@@ -534,6 +597,36 @@ h1{font-size:18px;color:#58a6ff;margin-bottom:4px}
 <div class="card" id="varTraceCard" style="display:none">
 <h2>🔍 变量生命周期追踪 <span style="font-size:11px;color:#8b949e;font-weight:400">（这个指针从声明到崩溃经历了什么）</span></h2>
 <div id="varTrace"></div>
+</div>
+
+<!-- ═══ 崩溃帧变量（gdb bt full / DIE 参数表） ═══ -->
+<div class="card" id="fvCard" style="display:none">
+<h2>🧮 崩溃帧变量 <span style="font-size:11px;color:#8b949e;font-weight:400">（每帧参数/局部变量的运行时值，gdb bt full 或 DWARF 参数表恢复）</span></h2>
+<div id="fvArea"></div>
+</div>
+
+<!-- ═══ 崩溃现场反汇编 ═══ -->
+<div class="card" id="disasmCard" style="display:none">
+<h2>⚡ 崩溃现场反汇编 <span style="font-size:11px;color:#8b949e;font-weight:400">（崩溃指令前后的指令流，看访存操作数来源）</span></h2>
+<pre id="disasmArea" style="background:#0d1117;border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;font-family:Consolas,monospace;color:#c9d1d9"></pre>
+</div>
+
+<!-- ═══ 崩溃线程寄存器（全量解码） ═══ -->
+<div class="card" id="regsCard" style="display:none">
+<h2>🎛 寄存器全解码 <span style="font-size:11px;color:#8b949e;font-weight:400">（每个寄存器的值是什么：代码/全局/堆/栈/字符串）</span></h2>
+<div id="regsArea" style="max-height:320px;overflow-y:auto"></div>
+</div>
+
+<!-- ═══ 崩溃现场栈内存 ═══ -->
+<div class="card" id="stackDumpCard" style="display:none">
+<h2>🧱 崩溃现场栈内存 <span style="font-size:11px;color:#8b949e;font-weight:400">（SP 起逐字解码：返回地址/局部变量/指针，每个字是什么）</span></h2>
+<div id="stackDumpArea" style="max-height:360px;overflow-y:auto"></div>
+</div>
+
+<!-- ═══ 锁等待关系 ═══ -->
+<div class="card" id="lockCard" style="display:none">
+<h2>🔒 锁等待关系 <span style="font-size:11px;color:#8b949e;font-weight:400">（谁持锁/谁等锁/死锁环）</span></h2>
+<div id="lockArea"></div>
 </div>
 
 <!-- ═══ 内存布局 ═══ -->
@@ -831,6 +924,131 @@ if (D.conclusions && D.conclusions.length > 0) {
 } else {
     conclEl.innerHTML = '<div style="color:#8b949e">暂无结论</div>';
 }
+
+// ── 崩溃帧变量 ──
+if (D.frame_vars && D.frame_vars.frames && D.frame_vars.frames.length) {
+    document.getElementById('fvCard').style.display = '';
+    const fvEl = document.getElementById('fvArea');
+    let h = '<div style="font-size:12px;color:#8b949e;margin-bottom:8px">来源：' +
+        D.frame_vars.source + '｜' + (D.frame_vars.confidence || '') + '</div>';
+    D.frame_vars.frames.forEach(fr => {
+        if (!fr.vars || !fr.vars.length) return;
+        h += '<div style="font-size:13px;color:#79c0ff;margin:10px 0 4px">#' +
+             fr.level + ' ' + fr.func + (fr.loc ? ' <span style="color:#8b949e">@ '
+             + fr.loc + '</span>' : '') + '</div>';
+        h += '<table style="border-collapse:collapse;width:100%;font-size:12px">';
+        h += '<tr><th style="text-align:left;padding:3px 10px;color:#8b949e">变量</th>' +
+             '<th style="color:#8b949e">类别</th><th style="color:#8b949e">值</th>' +
+             '<th style="color:#8b949e;text-align:left">语义</th></tr>';
+        fr.vars.forEach(v => {
+            h += '<tr style="border-top:1px solid #21262d"><td style="padding:3px 10px;' +
+                 'font-family:monospace;color:#79c0ff">' + v.name +
+                 '</td><td style="color:#8b949e">' + (v.kind || '') +
+                 '</td><td style="font-family:monospace">' +
+                 String(v.value).replace(/</g, '&lt;').slice(0, 60) +
+                 '</td><td style="color:#c9d1d9">' +
+                 String(v.sem).replace(/</g, '&lt;').slice(0, 80) + '</td></tr>';
+        });
+        h += '</table>';
+    });
+    fvEl.innerHTML = h;
+}
+
+// ── 反汇编 ──
+if (D.disasm && D.disasm.length) {
+    document.getElementById('disasmCard').style.display = '';
+    const dEl = document.getElementById('disasmArea');
+    dEl.textContent = D.disasm.join('\n');
+    if (D.expr_evals && D.expr_evals.length) {
+        let eh = document.createElement('div');
+        eh.style.cssText = 'margin-top:10px;font-size:12px';
+        D.expr_evals.forEach(e => {
+            const d2 = document.createElement('div');
+            d2.style.cssText = 'margin:6px 0;padding:6px 10px;background:#0d1117;' +
+                'border-radius:4px;border-left:2px solid #d29922';
+            d2.innerHTML = '<span style="color:#d29922">(gdb) p ' + e.expr +
+                '</span><pre style="margin:4px 0 0;white-space:pre-wrap">' +
+                e.out.join('\n').replace(/</g, '&lt;') + '</pre>';
+            eh.appendChild(d2);
+        });
+        document.getElementById('disasmCard').appendChild(eh);
+    }
+}
+
+// ── 寄存器全解码 ──
+if (D.registers_deep && D.registers_deep.length) {
+    document.getElementById('regsCard').style.display = '';
+    const rEl = document.getElementById('regsArea');
+    let h = '<table style="border-collapse:collapse;width:100%;font-size:12px">';
+    D.registers_deep.forEach(r => {
+        h += '<tr style="border-top:1px solid #21262d"><td style="padding:3px 10px;' +
+             'font-family:monospace;color:#79c0ff;width:64px">' + r.reg +
+             '</td><td style="font-family:monospace;width:130px">' + r.value +
+             '</td><td style="color:#c9d1d9">' +
+             String(r.sem).replace(/</g, '&lt;') + '</td></tr>';
+    });
+    rEl.innerHTML = h + '</table>';
+}
+
+// ── 栈内存解码 ──
+if (D.stack_dump && D.stack_dump.length) {
+    document.getElementById('stackDumpCard').style.display = '';
+    const sEl = document.getElementById('stackDumpArea');
+    let h = '<table style="border-collapse:collapse;width:100%;font-size:12px">';
+    D.stack_dump.forEach(w => {
+        h += '<tr style="border-top:1px solid #21262d"><td style="padding:2px 10px;' +
+             'font-family:monospace;color:#8b949e;width:80px">SP+' +
+             '0x' + w.off.toString(16) + '</td><td style="font-family:monospace;' +
+             'color:#8b949e;width:120px">' + w.addr + '</td><td style="font-family:' +
+             'monospace;width:130px;color:#79c0ff">' + w.value +
+             '</td><td style="color:#c9d1d9">' +
+             String(w.sem).replace(/</g, '&lt;') + '</td></tr>';
+    });
+    sEl.innerHTML = h + '</table>';
+}
+
+// ── 锁等待关系 ──
+if (D.locks && (D.locks.waits.length || D.locks.deadlocks.length ||
+                D.locks.locks.length || D.locks.futex.length)) {
+    document.getElementById('lockCard').style.display = '';
+    const lEl = document.getElementById('lockArea');
+    let h = '';
+    if (D.locks.deadlocks.length) {
+        D.locks.deadlocks.forEach(cyc => {
+            h += '<div style="padding:8px 12px;margin:6px 0;border-radius:6px;' +
+                 'background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4)">' +
+                 '<b style="color:#f85149">⚠ 死锁环：</b>' +
+                 cyc.map(e => 'T' + e.waiter + ' 等 ' + e.lock +
+                        (e.named ? '(' + e.named + ')' : '') +
+                        ' (T' + e.holder + ' 持有)').join(' → ') + '</div>';
+        });
+    }
+    if (D.locks.waits.length) {
+        h += '<div style="font-size:13px;margin:8px 0 4px;color:#79c0ff">等待关系</div>';
+        D.locks.waits.forEach(e => {
+            h += '<div style="font-size:12px;padding:3px 10px;border-left:2px solid #d29922;' +
+                 'margin:3px 0">T' + e.waiter + ' 等锁 ' + e.lock +
+                 (e.named ? ' (= ' + e.named + ')' : '') + ' —— 持有者 T' + e.holder + '</div>';
+        });
+    }
+    if (D.locks.futex && D.locks.futex.length) {
+        h += '<div style="font-size:13px;margin:8px 0 4px;color:#79c0ff">futex 阻塞点（寄存器解码）</div>';
+        D.locks.futex.forEach(fx => {
+            h += '<div style="font-size:12px;padding:3px 10px;color:#c9d1d9">' +
+                 'T' + fx.tid + ' 阻塞在 futex@' + fx.uaddr +
+                 (fx.named ? ' (= ' + fx.named + ')' : '') + '</div>';
+        });
+    }
+    if (D.locks.locks.length) {
+        h += '<div style="font-size:13px;margin:8px 0 4px;color:#79c0ff">活跃锁</div>';
+        D.locks.locks.forEach(lk => {
+            h += '<div style="font-size:12px;padding:3px 10px;color:#8b949e">' +
+                 lk.addr + (lk.named ? ' (= ' + lk.named + ')' : '') +
+                 ' —— 持有者 T' + lk.owner + ' (' + lk.state + ')</div>';
+        });
+    }
+    lEl.innerHTML = h;
+}
 </script>
 </body>
 </html>"""
@@ -860,13 +1078,18 @@ class _VizHandler(BaseHTTPRequestHandler):
 def start_visualization(core, heap_result=None, matches=None, traces=None,
                         conclusions=None, cfi_frames=None, scan_results=None,
                         source_root=None, snippets=None,
+                        deepdive=None, framevars=None, regs_deep=None,
+                        stackdump=None, lock_result=None, addr_names=None,
                         preferred_port=8080, auto_open=True, timeout=0,
                         _prebuilt_data=None):
     if _prebuilt_data:
         viz_data = _prebuilt_data
     else:
         viz_data = build_viz_data(core, heap_result, matches, traces, conclusions,
-                                  cfi_frames, scan_results, source_root, snippets)
+                                  cfi_frames, scan_results, source_root, snippets,
+                                  deepdive=deepdive, framevars=framevars,
+                                  regs_deep=regs_deep, stackdump=stackdump,
+                                  lock_result=lock_result, addr_names=addr_names)
     port = _find_free_port(preferred_port)
     if port is None:
         raise RuntimeError("端口 %d-%d 全部被占用" % (preferred_port, preferred_port + 99))

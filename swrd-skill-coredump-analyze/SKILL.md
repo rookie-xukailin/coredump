@@ -136,6 +136,9 @@ python3.8 "$BMCORE" analyze <core文件> --config "$WS/bmccore.toml" \
 **工具会输出**：
 - `*_report.md`（人读格式，含源码片段）
 - `*_report.json`（机读格式，结构化数据）
+- `*_evidence.json`（**证据包**——gdb+Python 双引擎全量取证：帧变量
+  运行时值/寄存器全解码/崩溃现场反汇编/栈内存逐字解码/堆对象字段/
+  锁等待图，叙事首选深度输入）
 
 ### 第 3 步：解析工具输出
 
@@ -147,19 +150,28 @@ python3.8 <技能根目录>/scripts/coredump_analyze.py "<技能根目录>/works
 
 # 或者直接读 JSON
 cat "<技能根目录>/workspace/report/"*_report.json
+
+# 证据包（深度证据，一次拿全）
+cat "<技能根目录>/workspace/report/"*_evidence.json
 ```
 
 **你需要关注的字段**：
 
 | 字段 | 含义 | 后续动作 |
 |---|---|---|
-| `定位结论.conclusions` | 最终判定（确认/疑似） | 这是分析的起点 |
+| `*_evidence.json: frame_vars` | **崩溃帧参数/局部变量的运行时值**（gdb bt full 或 DWARF 参数表，标注来源与可信度） | 参数归因：NULL/UAF 经哪个参数传入；与源码比对值语义 |
+| `*_evidence.json: registers` | 崩溃线程全寄存器语义解码（代码/全局/堆/栈/字符串） | 出错地址与寄存器交叉：对象基址在哪个寄存器 |
+| `*_evidence.json: disasm / expr_evals` | 崩溃指令反汇编 + gdb `p *ptr` 表达式求值 | 看崩溃访存指令的操作数来源；结构体字段运行时值 |
+| `*_evidence.json: stack_dump` | SP 起逐字解码（每个栈字的语义） | 参数传递区/局部变量槽/返回地址逐字核对 |
+| `*_evidence.json: heap_objects / holders` | 受害对象字段级还原 + 持有链 | 对象身份与"谁拿着指向它的指针" |
+| `定位结论.conclusions` | 最终判定（确认/疑似），含参数归因/寄存器佐证/死锁环 | 这是分析的起点 |
 | `线程现场还原` | 每线程顶部帧 + 阻塞点(futex@地址=**变量名**) + 持锁/等锁 | 叙事底稿：线程角色与交叉关系 |
-| `变量生命周期` | 崩溃指针的 声明→初始化→释放→崩溃 轨迹 | 溯源骨架：核对初始化缺失/置空/释放路径 |
+| `变量生命周期` | 崩溃指针的 声明→初始化→释放→崩溃 轨迹（**含崩溃时刻运行时值**） | 溯源骨架：核对初始化缺失/置空/释放路径 |
 | `addr_names / DIE 证据` | 锁/futex/出错地址的 DWARF 变量名；受害对象按 sizeof 反推 struct 与字段偏移 | 叙事直接用变量名与结构体名，少写裸地址 |
 | `崩溃线程寄存器` | syscall 号 + 参数寄存器（a0-a2 等） | 判断崩溃调用本身及其参数值 |
 | `回溯.frames` | 调用栈（file:line） | → 去读这些源码 |
 | `堆取证.notes` | chunk 损坏/受害对象/指纹 | → 去源码 grep 指纹 |
+| `堆对象还原` | 受害/嫌疑 chunk 的字段级运行时值 | → 与 struct 定义比对定位越界字段 |
 | `栈扫描.scan_frames` | gdb 断链时的降级回溯 | → 验证帧是否合理 |
 | `符号配对.modules` | 哪些模块配上了/missing | → 提醒用户补符号表 |
 | `console 关键行` | glibc abort 消息 | → 定位是堆检查还是 assert |

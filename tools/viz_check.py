@@ -92,6 +92,12 @@ def check_cell(name, arch):
         scan_results=results.get("scan_results"),
         source_root=cfg.source_root,
         snippets=results.get("snippets"),
+        deepdive=results.get("deepdive"),
+        framevars=results.get("framevars"),
+        regs_deep=results.get("regs_deep"),
+        stackdump=results.get("stackdump"),
+        lock_result=results.get("lock_result"),
+        addr_names=results.get("addr_names"),
     )
 
     fails, warns = [], []
@@ -122,6 +128,22 @@ def check_cell(name, arch):
         fails.append("mem_regions 为空")
     if not (viz_data.get("conclusions") or []):
         fails.append("conclusions 为空")
+    # 深度证据区：键必须存在（值可为 None——离线模式无 gdb 时无反汇编）
+    for k in ("frame_vars", "registers_deep", "stack_dump", "disasm",
+              "expr_evals", "locks"):
+        if k not in viz_data:
+            fails.append("viz 缺深度字段 %s" % k)
+    if not (viz_data.get("registers_deep") or []):
+        fails.append("registers_deep 为空")
+    story_txt = " ".join(s.get("detail", "") + s.get("hint", "")
+                         for s in story)
+    story_txt += " " + " ".join(
+        c.get("text", "") for c in (viz_data.get("conclusions") or []))
+    if not (viz_data.get("stack_dump") or []):
+        if "栈溢出" in story_txt:
+            warns.append("stack_dump 为空（栈溢出形态：SP 已越出转储区）")
+        else:
+            fails.append("stack_dump 为空")
 
     try:
         payload = json.dumps(viz_data, ensure_ascii=False)
@@ -142,6 +164,11 @@ def check_cell(name, arch):
         "conclusions": len(viz_data.get("conclusions") or []),
         "crash_source": bool(viz_data.get("crash_source")),
         "var_trace": len(viz_data.get("var_trace") or []),
+        "regs_decoded": len(viz_data.get("registers_deep") or []),
+        "stack_words": len(viz_data.get("stack_dump") or []),
+        "frame_vars": sum(len(f.get("vars", []))
+                          for f in ((viz_data.get("frame_vars") or {})
+                                    .get("frames", []))),
     }
     with open(os.path.join(VIZDIR, tag + ".json"), "w",
               encoding="utf-8") as f:

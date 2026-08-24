@@ -1,6 +1,30 @@
-# 任务完成：78 维度 × 3 架构 = 234 格全量系统测试
+# 任务完成：78 维度 × 3 架构 = 234 格 + 深度分析引擎（v5 证据包架构）
 
-> 本文件是跨会话任务清单。**当前任务已全部完成**（2026-08-24，含消息队列批次）。
+> 本文件是跨会话任务清单。**当前任务已全部完成**（2026-08-24，含消息队列批次
+> 与深度分析引擎：gdb+Python 双引擎全量取证 → 证据包 → LLM 叙事闭环）。
+
+## 深度分析引擎（v5，2026-08-24 追加）
+
+用户要求"分析不能只看栈回溯"——引擎新增五个深度技能并接通 LLM 闭环：
+
+- **deepdive**（gdb）：`thread apply all bt full`（每帧参数+局部变量运行时值）、
+  `info registers` 全量、崩溃指令反汇编 `x/16i $pc-8`、栈内存 `x/48gx $sp`、
+  出错地址周边内存、自动 `p *ptr` 表达式求值
+- **framevars**：gdb bt full 为主；离线兜底 = dieinfo 参数表（DW_TAG_formal_parameter
+  的 DW_OP_regN × 入口寄存器，DWARF 精确非启发式）
+- **regs**：崩溃线程全寄存器语义解码（decode.py：区域/全局名/堆 chunk/栈偏移/
+  字符串），参数寄存器与 DIE 参数名配对（"x0 = dev = 0x0"）
+- **stackdump**：SP 起逐字解码（返回地址/局部变量/指针，每字一句语义）
+- **heaptyping**：受害/嫌疑 chunk 按 DIE 成员表字段级还原 + searchref 持有链
+- **triage 增强**：参数归因结论、寄存器×出错地址交叉（精确/页级）、死锁环
+- **证据包** `<case>_evidence.json`：全部分区+来源+可信度，SKILL.md 六步法
+  首选输入；AI 写 narrative.json → render_report.py 渲染 HTML（已实测 3 例）
+- 面板新增卡片：崩溃帧变量/崩溃现场反汇编/寄存器全解码/栈内存/锁等待关系
+- 顺手修复：lockmon TID 字节正则未转义的编译崩溃（re.escape）
+
+深度引擎验证：234 格全量 analyze+verdict PASS 232/0/2、viz_check
+VIZ PASS 233/0（栈溢出格 SP 越界允许空栈转储）、run_all 35 测试 0 失败
+（系统测试 PASS 232/0）、浏览器验证新卡片渲染正常。
 
 ## 最终状态
 

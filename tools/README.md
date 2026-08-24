@@ -127,12 +127,32 @@ qemu-user 生成的 core 与真实内核 core 有差异，需要以下处理：
 ## 可视化验证
 
 ```bash
-# 逐格校验面板数据结构（219 格全部过一遍，产出 viz/<tag>.json）
+# 逐格校验面板数据结构（全量格过一遍，产出 viz/<tag>.json）
 python3 tools/viz_check.py
 
 # 8080 端口画廊：索引页按批次分组，逐格查看完整分析面板
 python3 tools/viz_gallery.py
 ```
+
+## 深度分析（v5：gdb+Python 双引擎全量取证 → 证据包 → LLM 叙事）
+
+引擎在传统"信号+回溯"之上新增五个深度技能，产出 `<case>_evidence.json`
+证据包（gdb bt full 帧变量运行时值/寄存器全解码/崩溃现场反汇编/栈内存
+逐字解码/堆对象字段级还原+持有链/锁等待图，每条标注来源与可信度）：
+
+| 技能 | 路径 | 产出 |
+|---|---|---|
+| deepdive | gdb（bt full/info registers/x 反汇编+x 栈/p *ptr 表达式） | 每帧参数+局部变量运行时值、崩溃指令流、栈原始字、对象解引用 |
+| framevars | gdb bt full；离线兜底=DIE 参数表(DW_OP_regN)×入口寄存器 | 崩溃链各帧变量值（标注确认/离线启发式） |
+| regs | Python（区域/全局名/堆块/栈偏移/字符串语义化） | 全部 GP 寄存器"它是什么"解码，参数寄存器与 DIE 参数名配对 |
+| stackdump | Python | 崩溃线程 SP 起 64 字逐字语义解码 |
+| heaptyping | Python（DIE 结构体表） | 受害/嫌疑 chunk 字段级还原 + "谁持有该指针"持有链 |
+
+triage 新增结论源：参数归因（崩溃经由参数 X 传入，值 Y）、寄存器×出错
+地址交叉（精确/页级基址归因）、死锁环。vartrace 与运行时值联动（悬垂
+指针判定）。面板新增 5 张卡片（帧变量/反汇编/寄存器/栈内存/锁关系）；
+SKILL.md 六步法把证据包列为叙事首选输入，AI 写 narrative.json →
+render_report.py 渲染 HTML 闭环。
 
 ## 编译基线
 

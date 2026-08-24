@@ -432,12 +432,21 @@ def test_dieinfo_naming():
     assert dieinfo._dw_op_addr_value(b"\x03\x10", 8) is None       # 长度不足
     dieinfo._cache["fake.elf"] = {
         "vars": {0x7f42: "g_sensor_lock"},
-        "structs": [("fan_ctrl", 48, {0: "name", 0x18: "set_pwm"})]}
+        "var_ranges": [(0x7f42, 8, "g_sensor_lock")],
+        "structs": [("fan_ctrl", 48, {0: ("name", "char*"),
+                                      0x18: ("set_pwm", "int")})],
+        "funcs": {"fan_ctrl_set": [("dev", 0)]}}
     assert dieinfo.name_address("fake.elf", 0x7f42) == "g_sensor_lock"
     assert dieinfo.name_address("fake.elf", 0x1) is None
+    assert dieinfo.name_address_loose("fake.elf", 0x7f46) == "g_sensor_lock+0x4"
     assert dieinfo.struct_by_size("fake.elf", 48)[0] == "fan_ctrl"
     assert dieinfo.struct_by_size("fake.elf", 40) is None
     assert dieinfo.member_name("fake.elf", 48, 0x18) == "fan_ctrl.set_pwm"
+    assert dieinfo.params_of("fake.elf", "fan_ctrl_set") == [("dev", 0)]
+    assert dieinfo.params_of("fake.elf", "no_such_fn") == []
+    assert dieinfo.dwarf_reg_name("arm64", 0) == "x0"
+    assert dieinfo.dwarf_reg_name("riscv64", 10) == "a0"
+    assert dieinfo.dwarf_reg_name("arm32", 3) == "r3"
     assert dieinfo.name_address("no/such/file", 0x7f42) is None    # 缺文件→空表降级
 
 

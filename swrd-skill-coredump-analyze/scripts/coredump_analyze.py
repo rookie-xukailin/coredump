@@ -79,6 +79,68 @@ def _parse_section(title, lines):
         notes = [l.lstrip("- ") for l in lines if l.startswith("- ")]
         return {"notes": notes, "raw": text}
 
+    # 堆对象还原（字段级）
+    if "堆对象还原" in title:
+        objects = []
+        cur = None
+        for l in lines:
+            if l.startswith("**对象还原："):
+                cur = {"header": l.strip("*"), "fields": []}
+                objects.append(cur)
+            elif l.startswith("| +") and cur is not None:
+                parts = [p.strip() for p in l.split("|")[1:-1]]
+                if len(parts) >= 5:
+                    cur["fields"].append({
+                        "offset": parts[0], "member": parts[1],
+                        "type": parts[2], "value": parts[3],
+                        "sem": parts[4]})
+        return {"objects": objects, "holders": [
+            l.lstrip("- 持有链：") for l in lines if l.startswith("- 持有链")]}
+
+    # 崩溃帧变量
+    if "帧变量" in title:
+        frames = []
+        cur = None
+        for l in lines:
+            if l.startswith("**#"):
+                cur = {"header": l.strip("*"), "vars": []}
+                frames.append(cur)
+            elif l.startswith("| ") and cur is not None and "---" not in l \
+                    and "变量" not in l:
+                parts = [p.strip() for p in l.split("|")[1:-1]]
+                if len(parts) >= 4:
+                    cur["vars"].append({
+                        "name": parts[0], "kind": parts[1],
+                        "value": parts[2], "sem": parts[3]})
+        return {"frames": frames}
+
+    # 崩溃现场栈内存
+    if "栈内存" in title:
+        words = []
+        for l in lines:
+            if l.startswith("| +") or l.startswith("| SP"):
+                parts = [p.strip() for p in l.split("|")[1:-1]]
+                if len(parts) >= 4:
+                    words.append({
+                        "sp_off": parts[0], "addr": parts[1],
+                        "value": parts[2], "sem": parts[3]})
+        return {"words": words}
+
+    # 反汇编 / 表达式求值：原文返回（AI 直读指令流）
+    if "反汇编" in title or "表达式" in title:
+        return {"raw": text}
+
+    # 寄存器全解码
+    if "寄存器" in title:
+        regs = []
+        for l in lines:
+            if l.startswith("| ") and "---" not in l and "寄存器" not in l:
+                parts = [p.strip() for p in l.split("|")[1:-1]]
+                if len(parts) >= 3:
+                    regs.append({"reg": parts[0], "value": parts[1],
+                                 "sem": parts[2]})
+        return {"registers": regs}
+
     # 源码片段
     if "源码片段" in title:
         return {"location": title, "code": text}
