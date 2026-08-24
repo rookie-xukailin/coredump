@@ -66,6 +66,7 @@ def test_e2e_analyze():
         status_text = "\n".join(src_sec["lines"])
         assert "backtrace" in status_text
         assert "vartrace" in status_text         # 变量生命周期技能应登记状态
+        assert "dieinfo" in status_text          # DIE 语义命名技能应登记状态
 
         # 临时目录应被清理
         leftovers = [d for d in os.listdir(tmp) if d.startswith("bmccore_")]
@@ -421,6 +422,23 @@ def test_render_report_smoke():
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_dieinfo_naming():
+    """DIE 语义命名：DW_OP_addr 解码 / 查表 API / 无 DWARF 产物降级。"""
+    from bmccore import dieinfo
+    assert dieinfo._dw_op_addr_value(b"\x03\x10\x00\x00\x00", 4) == 0x10
+    assert dieinfo._dw_op_addr_value(b"\x05\x10", 4) is None       # 非 DW_OP_addr
+    assert dieinfo._dw_op_addr_value(b"\x03\x10", 8) is None       # 长度不足
+    dieinfo._cache["fake.elf"] = {
+        "vars": {0x7f42: "g_sensor_lock"},
+        "structs": [("fan_ctrl", 48, {0: "name", 0x18: "set_pwm"})]}
+    assert dieinfo.name_address("fake.elf", 0x7f42) == "g_sensor_lock"
+    assert dieinfo.name_address("fake.elf", 0x1) is None
+    assert dieinfo.struct_by_size("fake.elf", 48)[0] == "fan_ctrl"
+    assert dieinfo.struct_by_size("fake.elf", 40) is None
+    assert dieinfo.member_name("fake.elf", 48, 0x18) == "fan_ctrl.set_pwm"
+    assert dieinfo.name_address("no/such/file", 0x7f42) is None    # 缺文件→空表降级
 
 
 def test_cli_info_cmd():

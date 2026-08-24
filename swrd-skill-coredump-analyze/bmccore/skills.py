@@ -40,7 +40,7 @@ def _throttled(log, every=2.0):
 
 
 ALL_SKILLS = ("symbols", "backtrace", "scan", "heap", "console", "triage",
-              "source", "vartrace", "cfi", "locks", "viz")
+              "source", "vartrace", "cfi", "locks", "dieinfo", "viz")
 
 
 class Pipeline(object):
@@ -306,6 +306,36 @@ class Pipeline(object):
         else:
             self._mark("locks", "skipped", "单线程或未启用")
 
+        # ---- 10. 语义命名（dieinfo）：锁/futex/出错地址 → DWARF 变量名 ----
+        addr_names = {}
+        if "dieinfo" in want:
+            from . import dieinfo as dieinfo_mod
+            cand = set()
+            _vic = (core.siginfo or {}).get("addr")
+            if _vic:
+                cand.add(_vic)
+            if lock_result:
+                for lk in lock_result.locks:
+                    cand.add(lk.addr)
+                for e in lock_result.wait_graph:
+                    cand.add(e.lock_addr)
+                for bp in lock_result.futex_waits.values():
+                    if bp.get("sys") == "futex" and bp.get("uaddr"):
+                        cand.add(bp["uaddr"])
+            for a in cand:
+                mr = next((m for m in matches
+                           if m.artifact and m.module.contains(a)), None)
+                if mr is None:
+                    continue
+                nm = dieinfo_mod.name_address(mr.artifact.path, a)
+                if nm:
+                    addr_names[a] = nm
+            self._mark("dieinfo", "ok" if addr_names else "skipped",
+                       "%d 个地址命名" % len(addr_names) if addr_names
+                       else "无产物含 DWARF 或候选地址未命中变量")
+        else:
+            self._mark("dieinfo", "skipped", "未启用")
+
         return {
             "core": core,
             "matches": matches,
@@ -322,6 +352,9 @@ class Pipeline(object):
             "lock_result": lock_result,
             "var_events": var_events,
             "var_root_cause": var_root,
+            "addr_names": addr_names,
+            "exe_artifact_path": (exe_match.artifact.path
+                                  if exe_match and exe_match.artifact else None),
         }
 
 
@@ -359,17 +392,25 @@ def _scene_rows(core, results):
     futex_waits = {}
     if lock_result:
         futex_waits = getattr(lock_result, "futex_waits", None) or {}
+    addr_names = results.get("addr_names") or {}
+
+    def _n(a):
+        return addr_names.get(a)
+
     for t in core.threads:
         lk_txt = []
         for a in held_by.get(t.tid, [])[:3]:
-            lk_txt.append("持锁 0x%x" % a)
+            nm = _n(a)
+            lk_txt.append("持锁 0x%x%s" % (a, "(=%s)" % nm if nm else ""))
         for a, h in wait_by.get(t.tid, [])[:3]:
-            lk_txt.append("等锁 0x%x(持有者T%d)" % (a, h))
+            nm = _n(a)
+            lk_txt.append("等锁 0x%x%s(持有者T%d)" % (a, "(=%s)" % nm if nm else "", h))
         blk = ""
         bp = futex_waits.get(t.tid)
         if bp:
             if bp.get("sys") == "futex" and bp.get("uaddr"):
-                blk = "futex@0x%x" % bp["uaddr"]
+                nm = _n(bp["uaddr"])
+                blk = "futex@0x%x%s" % (bp["uaddr"], "(=%s)" % nm if nm else "")
             else:
                 blk = "syscall %s" % bp.get("sys", "?")
         rows.append({
@@ -392,13 +433,18 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
     rep.meta = {"source": source_name or core.path, "arch": summ["arch"]}
 
     # 概览
+    fault = summ["fault_addr"]
+    fault_txt = "0x%x" % fault if fault is not None else "-"
+    _fa = (results.get("addr_names") or {}).get(fault)
+    if _fa:
+        fault_txt += " (= %s)" % _fa
     pairs = [("core 文件", source_name or core.path),
              ("架构", "%s (ELF%d)" % (summ["arch"], summ["elfclass"])),
              ("崩溃进程", "%s (pid=%s)" % (summ["fname"] or "?",
                                           intake_meta.get("pid") if intake_meta else crash.tid)),
              ("命令行", summ["psargs"]),
              ("崩溃信号", summ["signal"]),
-             ("出错地址", "0x%x" % summ["fault_addr"] if summ["fault_addr"] is not None else "-"),
+             ("出错地址", fault_txt),
              ("线程数", summ["nthreads"]),
              ("加载模块数", summ["nmodules"])]
     if intake_meta and intake_meta.get("stamp"):
@@ -510,6 +556,16 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
                              "重点怀疑它越界写穿下一个 chunk 头" % (
                                  c.prev.offset, c.prev.size,
                                  "in-use" if c.prev.inuse else "free"))
+                _exe_p = results.get("exe_artifact_path")
+                if _exe_p:
+                    from . import dieinfo as dieinfo_mod
+                    _st = dieinfo_mod.struct_by_size(_exe_p, c.prev.size)
+                    if _st:
+                        _members = ", ".join("0x%x:%s" % (o, m)
+                                             for o, m in sorted(_st[1].items())[:6])
+                        lines.append("- 前块尺寸 0x%x 与 **struct %s** 匹配"
+                                     "（DIE 证据；成员偏移：%s）"
+                                     % (c.prev.size, _st[0], _members or "无"))
         if hr.references:
             lines.append("")
             lines.append("指向受害区的引用（谁拿着指向这里的指针）：")
