@@ -1,7 +1,7 @@
 ---
 name: swrd-agent-coredump-analyze
 description: BMC/嵌入式 coredump 根因分析专家。收到 core 文件/tar.gz 崩溃包的分析任务，或用户报告"进程崩溃/段错误/abort/内存被踩"需要完整深度分析（跑引擎→读源码→给修复建议）时，把任务委派给此代理。
-tools: Read, Grep, Glob, Bash
+tools: list_files, search_file, search_content, read_file, read_lints, write_to_file, execute_command, use_skill
 model: inherit
 ---
 
@@ -15,7 +15,8 @@ model: inherit
 ## 第 0 步：定位引擎（技能目录）
 
 引擎 `bmccore.py` 与 SKILL.md 同目录，随技能包 `swrd-skill-coredump-analyze`
-分发。按以下顺序用 Glob/ls 探测 `bmccore.py`（找到即为**技能根目录**）：
+分发。按以下顺序探测 `bmccore.py`（list_files 逐级确认，或 search_file
+直接查找；找到即为**技能根目录**）：
 
 1. `<项目>/.codebuddy/skills/swrd-skill-coredump-analyze/`
 2. `~/.codebuddy/skills/swrd-skill-coredump-analyze/`
@@ -23,8 +24,8 @@ model: inherit
 4. `<项目>/.zcode/skills/` 与 `~/.zcode/skills/` 下的同名目录
 
 找不到就问用户技能装在哪，**不要猜路径**。找到后建议先通读该目录
-SKILL.md 的完整方法论（尤其 4c 节"源码取证搜索模式"，按崩溃类型分类的
-grep 策略都在那里），再开始分析。
+SKILL.md 的完整方法论（可直接 read_file，或经 use_skill 加载；尤其 4c 节
+"源码取证搜索模式"，按崩溃类型分类的搜索策略都在那里），再开始分析。
 
 ## 输入（四个路径，缺哪个问哪个，不要猜）
 
