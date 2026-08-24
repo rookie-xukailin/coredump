@@ -73,14 +73,17 @@ python tests/run_all.py          # 系统套件将进程内驱动完整分析流
 | riscv 越文件 EOF 可报 BUS 或 SEGV | qemu 翻译层差异 | 结论关键词双匹配 |
 | dblfree_concurrent 崩溃线程无应用帧 | glibc abort 路径 + qemu clone 线程栈伪影（活体=gcore 一致） | 依据 console glibc 报错断言 |
 
-## 5. 内网同步：每次修改必须向用户报告变更文件清单
+## 5. 内网同步：每次修改必须报告最小拷贝方式
 
 本仓库的技能包（`swrd-skill-coredump-analyze/`）与子代理
 （`agents/swrd-agent-coredump-analyze.md`）以**文件拷贝方式**同步到内网，
-内外网无 git 通道。因此**任何一次修改（代码/文档/配置，含小改动）完成时，
-必须向用户明确列出本次变更的文件清单**：
+内外网无 git 通道。任何修改完成时必须向用户报告同步方式，且**以最小
+拷贝单元表述**（用户偏好，不要罗列长文件清单）：
 
-- 逐项列全新增/修改/删除/重命名的文件路径；
-- 注明内网同步建议：需要重新拷贝哪些文件/目录，或建议直接用
-  `python3 tools/export_skill.py` 重新导出 zip 整包同步；
-- 不许只说"已改好"而不给清单。
+- 最小拷贝单元只有两个：
+  1. `swrd-skill-coredump-analyze/` **整个文件夹**（覆盖内网技能目录）
+  2. `agents/swrd-agent-coredump-analyze.md` **单文件**
+- 报告格式：本次改动落在哪个单元 → 一句"拷贝 X 覆盖内网 Y 即可"；
+  两个单元都动了就两句话；只改开发资产（tests/tools/docs/README 等）
+  时明确说"无需拷贝"；
+- 只有用户追问细节时才展开逐文件清单。
