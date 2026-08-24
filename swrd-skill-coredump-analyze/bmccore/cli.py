@@ -186,6 +186,17 @@ def cmd_analyze(args):
             stem = stem[:-4]
         written = rep.write(outdir, fmt=cfg.fmt, stem=stem + "_report")
 
+        # 证据包（evidence pack）：全量深度证据单文件，LLM 叙事与面板共用
+        ev_path = os.path.join(outdir, stem + "_evidence.json")
+        try:
+            import json as _json
+            with open(ev_path, "w", encoding="utf-8") as f:
+                _json.dump(results.get("evidence"), f, ensure_ascii=False,
+                           indent=1, default=str)
+            written.append(ev_path)
+        except (OSError, TypeError) as e:
+            log("[证据包] 写入失败: %s" % e)
+
         # 摘要打到屏幕
         print("=" * 62)
         print("分析完成: %s" % res.source_name)
@@ -233,6 +244,12 @@ def cmd_analyze(args):
                     scan_results=results["scan_results"],
                     source_root=cfg.source_root,
                     snippets=results["snippets"],
+                    deepdive=results.get("deepdive"),
+                    framevars=results.get("framevars"),
+                    regs_deep=results.get("regs_deep"),
+                    stackdump=results.get("stackdump"),
+                    lock_result=results.get("lock_result"),
+                    addr_names=results.get("addr_names"),
                     preferred_port=port, auto_open=True, timeout=tmo)
                 try:
                     server.serve_forever()

@@ -344,6 +344,8 @@ def run_heap_skill(core, threads, matches, victim_addr=None, ref_radius=64,
                 if fp_h:
                     res.fingerprints.append(Fingerprint(
                         "受害对象块头32字节(身份): %s" % fp_h.desc, fp_h.kind))
+                res.victim_chunk = c          # 供 heaptyping 做字段级还原
+                res.victim_region = r
                 if fp_t and fp_t.kind in ("pattern", "ascii", "magic"):
                     res.fingerprints.append(Fingerprint(
                         "受害对象块尾32字节(踩写痕迹): %s" % fp_t.desc, fp_t.kind))

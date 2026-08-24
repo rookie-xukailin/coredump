@@ -56,7 +56,9 @@ def addr_region_name(core, matches, addr):
     return "完全未映射地址"
 
 
-def triage(core, matches, console_hits=None, scan_result=None, heap_result=None):
+def triage(core, matches, console_hits=None, scan_result=None, heap_result=None,
+           deepdive=None, lock_result=None, framevars=None, regs_deep=None,
+           addr_names=None):
     """汇总所有证据，产出结论列表。"""
     out = []
     t = core.crash_thread
@@ -116,6 +118,67 @@ def triage(core, matches, console_hits=None, scan_result=None, heap_result=None)
                                   "确认", "信号"))
     else:
         out.append(Conclusion("崩溃信号 %s" % sig_name, "确认", "NT_PRSTATUS"))
+
+    # --- 崩溃经由哪个参数传入（帧变量 × 出错地址交叉）---
+    if framevars and fault is not None and framevars.get("frames"):
+        fr0 = framevars["frames"][0]
+        pick = None
+        for v in fr0.get("vars", []):
+            try:
+                iv = int(str(v.get("value", "")).split()[0], 0)
+            except (ValueError, IndexError):
+                continue
+            if iv == fault:
+                pick = v          # 精确命中：值 == 出错地址
+                break
+            if pick is None and fault < 0x1000 and iv == 0 and v.get("kind") == "参数":
+                pick = v          # 回退：空指针 + 偏移形态，参数恰为 NULL
+        if pick is not None:
+            out.append(Conclusion(
+                "崩溃经由 %s 的参数 <code>%s</code> 传入：崩溃时值为 %s（%s）"
+                "——向上追该参数的赋值路径" % (
+                    fr0.get("func", "?"), pick["name"], pick.get("value"),
+                    pick.get("sem", "")),
+                "确认", "framevars(%s)" % framevars.get("source", "?")))
+
+    # --- 崩溃指令的参数寄存器与出错地址一致（寄存器级佐证）---
+    if regs_deep and fault is not None and fault >= 0x1000:
+        hit = None
+        for rn, v, sem in regs_deep:
+            if v == fault:
+                hit = (rn, v, sem, 0)          # 精确：寄存器值 == 出错地址
+                break
+            if 0x1000 <= v <= fault < v + 0x1000:
+                if hit is None or fault - v < hit[3]:
+                    hit = (rn, v, sem, fault - v)   # 页级：基址在寄存器
+        if hit:
+            rn, v, sem, off = hit
+            if off == 0:
+                out.append(Conclusion(
+                    "出错地址 0x%x 即寄存器 %s 的值——崩溃访存指令以它为地址（%s）"
+                    % (fault, rn, sem),
+                    "确认", "寄存器解码"))
+            else:
+                out.append(Conclusion(
+                    "出错地址 0x%x = 寄存器 %s（基址 0x%x）+0x%x——崩溃访存"
+                    "以该寄存器为对象基址（%s）"
+                    % (fault, rn, v, off, sem),
+                    "确认", "寄存器解码"))
+
+    # --- 死锁（锁等待环）---
+    if lock_result is not None and getattr(lock_result, "deadlocks", None):
+        for cycle in lock_result.deadlocks[:1]:
+            chain = " → ".join("T%d等0x%x(T%d持有)" % (
+                e.waiter_tid, e.lock_addr, e.holder_tid) for e in cycle)
+            named = (addr_names or {}).get(cycle[0].lock_addr)
+            out.append(Conclusion(
+                "检测到死锁环：%s%s——涉事线程/锁见'线程现场还原'" % (
+                    chain, "（锁=%s）" % named if named else ""),
+                "确认", "锁分析(futex+TID扫描)"))
+        if len(lock_result.deadlocks) > 1:
+            out.append(Conclusion("另有 %d 个死锁环（见锁分析数据）"
+                                  % (len(lock_result.deadlocks) - 1),
+                                  "确认", "锁分析"))
 
     # --- 栈溢出特判 ---
     if scan_result is not None and scan_result.overflow:

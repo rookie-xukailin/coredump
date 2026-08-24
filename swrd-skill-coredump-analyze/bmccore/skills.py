@@ -2,13 +2,22 @@
 """技能编排：一条命令把解析->配符号->回溯->兜底扫描->堆取证->结论 串完。
 
 每个技能独立、可单独失败（失败记入报告的"技能状态"节，不影响其他技能）。
+
+流程顺序（v5 深度版）：
+  symbols → backtrace → deepdive(gdb bt full/反汇编/栈内存) → scan →
+  heap → console → locks → dieinfo → [decoder/framevars/regs/stackdump/
+  heaptyping 深度分析块] → triage(吃全部证据) → source → vartrace(吃运行时值)
+  → cfi → 证据包(evidence pack)
 """
 import os
 import re
 import time
 
 from . import console as console_mod
+from . import decode as decode_mod
+from . import framevars as framevars_mod
 from . import heap as heap_mod
+from . import heaptyping as heaptyping_mod
 from . import lockmon as lockmon_mod
 from . import scan as scan_mod
 from . import symbols as symbols_mod
@@ -39,8 +48,33 @@ def _throttled(log, every=2.0):
     return beat
 
 
-ALL_SKILLS = ("symbols", "backtrace", "scan", "heap", "console", "triage",
-              "source", "vartrace", "cfi", "locks", "dieinfo", "viz")
+ALL_SKILLS = ("symbols", "backtrace", "deepdive", "scan", "heap", "console",
+              "locks", "dieinfo", "framevars", "regs", "stackdump",
+              "heaptyping", "triage", "source", "vartrace", "cfi", "viz")
+
+
+def _serialize_locks(lock_result, addr_names):
+    """lock_result → JSON 可序列化 dict（证据包用）。"""
+    if lock_result is None:
+        return None
+    def _n(a):
+        return addr_names.get(a)
+    return {
+        "locks": [{"addr": lk.addr, "named": _n(lk.addr),
+                   "owner_tid": lk.owner_tid, "state": lk.lock_state,
+                   "kind": lk.kind} for lk in lock_result.locks],
+        "wait_graph": [{"waiter": e.waiter_tid, "lock": e.lock_addr,
+                        "named": _n(e.lock_addr),
+                        "holder": e.holder_tid}
+                       for e in lock_result.wait_graph],
+        "deadlocks": lock_result.deadlocks and [
+            [{"waiter": e.waiter_tid, "lock": e.lock_addr,
+              "named": _n(e.lock_addr), "holder": e.holder_tid}
+             for e in cycle] for cycle in lock_result.deadlocks] or [],
+        "futex_waits": {str(tid): bp for tid, bp in
+                        getattr(lock_result, "futex_waits", {}).items()},
+        "notes": lock_result.notes,
+    }
 
 
 class Pipeline(object):
@@ -105,6 +139,7 @@ class Pipeline(object):
         # ---- 2. GDB 精确回溯 ----
         traces = []
         raw_gdb = ""
+        script = None
         if "backtrace" in want:
             if tchain.has("gdb") and exe_match and exe_match.artifact:
                 self.log("[回溯] 运行 %s ..." % tchain.tools["gdb"])
@@ -121,6 +156,34 @@ class Pipeline(object):
             else:
                 self._mark("backtrace", "skipped",
                            "无 gdb 或主程序未配上符号" if not tchain.has("gdb") else "主程序未配上符号")
+
+        # ---- 2.5 gdb 深度取证（bt full/全寄存器/反汇编/栈内存/p 表达式）----
+        deepdive = None
+        if "deepdive" in want:
+            if tchain.has("gdb") and exe_match and exe_match.artifact:
+                from .deepdive import run_deepdive
+                self.log("[deepdive] gdb 深度取证（bt full/寄存器/现场）...")
+                _t0 = time.time()
+                fault = (core.siginfo or {}).get("addr")
+                deepdive = run_deepdive(
+                    tchain.tools["gdb"], self.core_path, script,
+                    core.crash_thread.tid if core.crash_thread else 0,
+                    fault_addr=fault, max_frames=min(cfg.max_frames or 50, 15),
+                    log=self.log)
+                n_fv = sum(len(fr.get("locals", []))
+                           for tr in deepdive.get("frames_full", [])
+                           for fr in tr["frames"])
+                if deepdive.get("frames_full"):
+                    self._mark("deepdive", "ok",
+                               "bt full %d 线程/%d 个变量值 + 反汇编%d行 + 表达式%d"
+                               % (len(deepdive["frames_full"]), n_fv,
+                                  len(deepdive.get("disasm", [])),
+                                  len(deepdive.get("expr_evals", []))))
+                else:
+                    self._mark("deepdive", "failed", "gdb 深度取证未取到数据")
+                self.log("[deepdive] 完成（耗时 %.1fs）" % (time.time() - _t0))
+            else:
+                self._mark("deepdive", "skipped", "无 gdb 或主程序未配上符号")
 
         # ---- 3. 栈扫描兜底 ----
         scan_results = {}      # tid -> ScanResult
@@ -198,15 +261,182 @@ class Pipeline(object):
             else:
                 self._mark("console", "skipped", "未提供 --console-log")
 
-        # ---- 6. triage 结论 ----
+        # ---- 6. 线程锁关联分析（提前：triage/证据包都要用）----
+        lock_result = None
+        if "locks" in want and len(core.threads) > 1:
+            self.log("[锁分析] %d 个线程 ..." % len(core.threads))
+            _t0 = time.time()
+            lock_result = lockmon_mod.analyze_locks(
+                core, core.threads, progress=_throttled(self.log),
+                full_scan=getattr(cfg, "lock_scan_full", False))
+            self.log("[锁分析] 完成，%d 个活跃锁 / %d 条等待关系（耗时 %.1fs）"
+                     % (len(lock_result.locks), len(lock_result.wait_graph),
+                        time.time() - _t0))
+            if lock_result.has_deadlock:
+                self._mark("locks", "ok", "⚠ 检测到死锁！")
+            elif lock_result.wait_graph:
+                self._mark("locks", "ok", "%d 条等待关系" % len(lock_result.wait_graph))
+            elif lock_result.locks:
+                self._mark("locks", "ok", "%d 个活跃锁（无等待/死锁）" % len(lock_result.locks))
+            else:
+                self._mark("locks", "skipped", "未检测到锁活动")
+        else:
+            self._mark("locks", "skipped", "单线程或未启用")
+
+        # ---- 7. 语义命名（dieinfo）：锁/futex/出错地址 → DWARF 变量名 ----
+        addr_names = {}
+        if "dieinfo" in want:
+            from . import dieinfo as dieinfo_mod
+            cand = set()
+            _vic = (core.siginfo or {}).get("addr")
+            if _vic:
+                cand.add(_vic)
+            if lock_result:
+                for lk in lock_result.locks:
+                    cand.add(lk.addr)
+                for e in lock_result.wait_graph:
+                    cand.add(e.lock_addr)
+                for bp in lock_result.futex_waits.values():
+                    if bp.get("sys") == "futex" and bp.get("uaddr"):
+                        cand.add(bp["uaddr"])
+            for a in cand:
+                mr = next((m for m in matches
+                           if m.artifact and m.module.contains(a)), None)
+                if mr is None:
+                    continue
+                nm = dieinfo_mod.name_address(mr.artifact.path, a)
+                if nm:
+                    addr_names[a] = nm
+            self._mark("dieinfo", "ok" if addr_names else "skipped",
+                       "%d 个地址命名" % len(addr_names) if addr_names
+                       else "无产物含 DWARF 或候选地址未命中变量")
+        else:
+            self._mark("dieinfo", "skipped", "未启用")
+
+        # ==============================================================
+        # 深度分析块：值语义解码 / 帧变量 / 全寄存器解码 / 栈内存 / 堆对象
+        # ==============================================================
+        decoder = decode_mod.Decoder(core, matches,
+                                     heap_result=heap_result,
+                                     addr_names=addr_names)
+        exe_artifact_path = (exe_match.artifact.path
+                             if exe_match and exe_match.artifact else None)
+
+        # ---- 7.5 帧变量恢复 ----
+        framevars_res = None
+        if "framevars" in want and core.crash_thread:
+            if deepdive and deepdive.get("frames_full"):
+                framevars_res = framevars_mod.from_gdb(
+                    deepdive, core.crash_thread.tid, decoder)
+            if framevars_res is None:
+                # 离线兜底：崩溃帧函数的 DIE 参数表 + 入口寄存器
+                top = None
+                for tr in traces:
+                    if tr.lwp == core.crash_thread.tid and tr.frames:
+                        fr = tr.frames[0]
+                        top = {"func": fr.func, "loc": fr.loc}
+                        break
+                if top is None:
+                    sr = scan_results.get(core.crash_thread.tid)
+                    if sr and sr.frames:
+                        fr = sr.frames[0]
+                        top = {"func": fr.func or "", "loc": fr.loc}
+                framevars_res = framevars_mod.from_offline(
+                    core, matches, exe_artifact_path, top, decoder)
+            if framevars_res:
+                n = sum(len(f["vars"]) for f in framevars_res["frames"])
+                self._mark("framevars", "ok",
+                           "%d 帧 / %d 个变量（%s）"
+                           % (len(framevars_res["frames"]), n,
+                              framevars_res["source"]))
+            else:
+                self._mark("framevars", "skipped", "无 gdb bt full 且 DIE 参数表未命中")
+        else:
+            self._mark("framevars", "skipped", "未启用或无崩溃线程")
+
+        # ---- 7.6 全寄存器语义解码 ----
+        regs_deep = []
+        if "regs" in want and core.crash_thread:
+            params = None
+            if framevars_res and exe_artifact_path and framevars_res["frames"]:
+                from . import dieinfo as dieinfo_mod
+                fn = framevars_res["frames"][0]["func"]
+                plist = dieinfo_mod.params_of(exe_artifact_path, fn)
+                if core.arch:
+                    params = [(nm, dieinfo_mod.dwarf_reg_name(core.arch.name, regno))
+                              for nm, regno in plist if regno is not None]
+            regs_deep = decode_mod.decode_regs(core, matches, decoder=decoder,
+                                               heap_result=heap_result,
+                                               addr_names=addr_names,
+                                               params=params)
+            self._mark("regs", "ok", "%d 个寄存器解码" % len(regs_deep))
+        else:
+            self._mark("regs", "skipped", "未启用或无崩溃线程")
+
+        # ---- 7.7 崩溃现场栈内存解码 ----
+        stackdump = []
+        if "stackdump" in want and core.crash_thread:
+            stackdump = decode_mod.decode_stack_words(core, decoder, words=64)
+            self._mark("stackdump", "ok", "SP 起 %d 字逐字解码" % len(stackdump))
+        else:
+            self._mark("stackdump", "skipped", "未启用或无崩溃线程")
+
+        # ---- 7.8 堆对象还原（字段级解码 + 持有链）----
+        heap_typing = []
+        holders = []
+        if "heaptyping" in want and heap_result and heap_result.has_heap:
+            art_paths = [m.artifact.path for m in matches if m.artifact]
+            prev_set = set(id(x.prev) for x in heap_result.corruptions if x.prev)
+            victim_c = getattr(heap_result, "victim_chunk", None)
+            victim_r = getattr(heap_result, "victim_region", None)
+            for desc, chunks in heap_result.regions:
+                try:
+                    start = int(desc.split("-")[0], 16)
+                except Exception:
+                    continue
+                for c in chunks:
+                    is_suspect = id(c) in prev_set          # 越界嫌疑前块
+                    is_victim = victim_c is c               # 受害对象
+                    if not (is_suspect or is_victim):
+                        continue
+                    obj = heaptyping_mod.decode_chunk(core, decoder, art_paths,
+                                                      start, c)
+                    if obj:
+                        obj["chunk"] = "%s+0x%x" % (desc, c.offset)
+                        obj["inuse"] = c.inuse
+                        obj["role"] = ("受害对象" if is_victim else "越界嫌疑前块")
+                        heap_typing.append(obj)
+            # 持有链：指向受害区的引用
+            if heap_result.corruptions:
+                try:
+                    start = int(heap_result.region_desc.split("-")[0], 16)
+                    vstart = start + heap_result.corruptions[0].offset
+                    holders = heaptyping_mod.holder_chain(
+                        core, decoder, heap_result, vstart - 64,
+                        vstart + 256)
+                except Exception:
+                    holders = []
+            self._mark("heaptyping", "ok" if heap_typing else "skipped",
+                       "%d 个对象还原 / %d 条持有链" % (len(heap_typing),
+                                                        len(holders))
+                       if heap_typing else "无尺寸匹配的结构体")
+        else:
+            self._mark("heaptyping", "skipped", "无堆数据或未启用")
+
+        # ---- 8. triage 结论（吃全部证据）----
         conclusions = []
         if "triage" in want:
             crash_scan = scan_results.get(core.crash_thread.tid) if core.crash_thread else None
             conclusions = triage_mod.triage(core, matches, console_hits or None,
-                                            crash_scan, heap_result)
+                                            crash_scan, heap_result,
+                                            deepdive=deepdive,
+                                            lock_result=lock_result,
+                                            framevars=framevars_res,
+                                            regs_deep=regs_deep,
+                                            addr_names=addr_names)
             self._mark("triage", "ok")
 
-        # ---- 7. 源码联动 ----
+        # ---- 9. 源码联动 ----
         src_index = SourceIndex(cfg.source_root) if cfg.source_root else None
         snippets = []
         if "source" in want and src_index:
@@ -242,7 +472,7 @@ class Pipeline(object):
         else:
             self._mark("source", "skipped", "未启用或未配置 --source-root")
 
-        # ---- 7.5 变量生命周期（vartrace）：崩溃行指针的 声明→赋值→释放→崩溃 轨迹
+        # ---- 10. 变量生命周期（vartrace）：崩溃行指针的 声明→赋值→释放→崩溃 轨迹
         var_events = None
         var_root = None
         if "vartrace" in want and snippets and cfg.source_root:
@@ -254,9 +484,16 @@ class Pipeline(object):
                     line_txt = _txt
                     break
             if line_txt:
+                # 运行时值（来自帧变量恢复）：崩溃行被解引用指针的实际取值
+                rt_val = None
+                if framevars_res:
+                    rt_val = _crash_ptr_runtime(framevars_res, line_txt)
                 var_events, var_root = vartrace_mod.trace_variable(
                     cfg.source_root, f0, ln0, line_txt,
-                    fault_addr=(core.siginfo or {}).get("addr"))
+                    fault_addr=(core.siginfo or {}).get("addr"),
+                    runtime_value=rt_val,
+                    runtime_sem=(decoder.decode(rt_val)
+                                 if isinstance(rt_val, int) else None))
                 self._mark("vartrace", "ok" if var_events else "skipped",
                            "" if var_events else (var_root or "未提取到指针变量"))
             else:
@@ -265,7 +502,7 @@ class Pipeline(object):
             self._mark("vartrace", "skipped",
                        "无源码联动（未配 source_root 或回溯无行号）")
 
-        # ---- 8. CFI 离线回溯（精确展开，无 gdb 时的最佳兜底） ----
+        # ---- 11. CFI 离线回溯（精确展开，无 gdb 时的最佳兜底）----
         cfi_frames = None
         if "cfi" in want and core.crash_thread:
             from .ehframe import cfi_unwind
@@ -284,57 +521,23 @@ class Pipeline(object):
             else:
                 self._mark("cfi", "skipped", "无 .eh_frame 或展开失败")
 
-        # ---- 9. 线程锁关联分析 ----
-        lock_result = None
-        if "locks" in want and len(core.threads) > 1:
-            self.log("[锁分析] %d 个线程 ..." % len(core.threads))
-            _t0 = time.time()
-            lock_result = lockmon_mod.analyze_locks(
-                core, core.threads, progress=_throttled(self.log),
-                full_scan=getattr(cfg, "lock_scan_full", False))
-            self.log("[锁分析] 完成，%d 个活跃锁 / %d 条等待关系（耗时 %.1fs）"
-                     % (len(lock_result.locks), len(lock_result.wait_graph),
-                        time.time() - _t0))
-            if lock_result.has_deadlock:
-                self._mark("locks", "ok", "⚠ 检测到死锁！")
-            elif lock_result.wait_graph:
-                self._mark("locks", "ok", "%d 条等待关系" % len(lock_result.wait_graph))
-            elif lock_result.locks:
-                self._mark("locks", "ok", "%d 个活跃锁（无等待/死锁）" % len(lock_result.locks))
-            else:
-                self._mark("locks", "skipped", "未检测到锁活动")
-        else:
-            self._mark("locks", "skipped", "单线程或未启用")
-
-        # ---- 10. 语义命名（dieinfo）：锁/futex/出错地址 → DWARF 变量名 ----
-        addr_names = {}
-        if "dieinfo" in want:
-            from . import dieinfo as dieinfo_mod
-            cand = set()
-            _vic = (core.siginfo or {}).get("addr")
-            if _vic:
-                cand.add(_vic)
-            if lock_result:
-                for lk in lock_result.locks:
-                    cand.add(lk.addr)
-                for e in lock_result.wait_graph:
-                    cand.add(e.lock_addr)
-                for bp in lock_result.futex_waits.values():
-                    if bp.get("sys") == "futex" and bp.get("uaddr"):
-                        cand.add(bp["uaddr"])
-            for a in cand:
-                mr = next((m for m in matches
-                           if m.artifact and m.module.contains(a)), None)
-                if mr is None:
-                    continue
-                nm = dieinfo_mod.name_address(mr.artifact.path, a)
-                if nm:
-                    addr_names[a] = nm
-            self._mark("dieinfo", "ok" if addr_names else "skipped",
-                       "%d 个地址命名" % len(addr_names) if addr_names
-                       else "无产物含 DWARF 或候选地址未命中变量")
-        else:
-            self._mark("dieinfo", "skipped", "未启用")
+        # ---- 12. 证据包（evidence pack）：全量证据汇总，LLM/面板共用 ----
+        evidence = _build_evidence(core, {
+            "deepdive": deepdive,
+            "framevars": framevars_res,
+            "regs_deep": regs_deep,
+            "stackdump": stackdump,
+            "heap_typing": heap_typing,
+            "holders": holders,
+            "locks": _serialize_locks(lock_result, addr_names),
+            "addr_names": addr_names,
+            "console_hits": console_hits,
+            "conclusions": [{"confidence": c.confidence, "text": c.text,
+                             "evidence": c.evidence}
+                            for c in conclusions],
+            "source_refs": [{"file": f, "line": ln, "real": real}
+                            for f, ln, real, _b in snippets],
+        })
 
         return {
             "core": core,
@@ -353,9 +556,80 @@ class Pipeline(object):
             "var_events": var_events,
             "var_root_cause": var_root,
             "addr_names": addr_names,
-            "exe_artifact_path": (exe_match.artifact.path
-                                  if exe_match and exe_match.artifact else None),
+            "exe_artifact_path": exe_artifact_path,
+            "deepdive": deepdive,
+            "framevars": framevars_res,
+            "regs_deep": regs_deep,
+            "stackdump": stackdump,
+            "heap_typing": heap_typing,
+            "holders": holders,
+            "evidence": evidence,
         }
+
+
+def _crash_ptr_runtime(framevars_res, crash_line):
+    """从帧变量恢复结果里找崩溃行被解引用指针的运行时值（int）。"""
+    import re as _re
+    # 崩溃行里的标识符（如 ctx->seq / *slot / buf[idx]）
+    ids = set(_re.findall(r"[A-Za-z_][A-Za-z0-9_]*", crash_line or ""))
+    stop = {"volatile", "char", "int", "long", "void", "static", "return",
+            "if", "for", "while", "struct", "const", "unsigned", "signed"}
+    ids -= stop
+    if not framevars_res:
+        return None
+    for fr in framevars_res.get("frames", [])[:1]:
+        for var in fr.get("vars", []):
+            if var["name"] in ids:
+                try:
+                    s = str(var.get("value", "")).strip()
+                    s = s.split()[0]
+                    return int(s, 0)
+                except (ValueError, IndexError):
+                    return None
+    return None
+
+
+def _build_evidence(core, parts):
+    """证据包汇总：分区 + 来源/可信度标注，全部 JSON 可序列化。"""
+    deepdive = parts.get("deepdive") or {}
+    fault = (core.siginfo or {}).get("addr")
+    sig = core.threads[0].cursig if core.threads else 0
+    return {
+        "meta": {
+            "说明": "全量证据包：gdb+Python 双引擎取证，供 LLM 根因推断与面板展示",
+            "可信度约定": "确认=DWARF/gdb 精确证据；启发式=Python 推断（标注于各条目）",
+        },
+        "summary": {
+            "signal": sig,
+            "fault_addr": fault,
+            "arch": core.arch.name if core.arch else None,
+            "process": (core.prpsinfo or {}).get("fname"),
+            "nthreads": len(core.threads),
+            "crash_tid": core.crash_thread.tid if core.crash_thread else None,
+        },
+        "registers": [
+            {"reg": rn, "value": v, "sem": sem,
+             "source": "NT_PRSTATUS+语义解码"}
+            for rn, v, sem in (parts.get("regs_deep") or [])],
+        "frame_vars": parts.get("framevars"),
+        "stack_dump": [
+            {"sp_off": off, "addr": a, "value": v, "sem": sem,
+             "source": "core 内存读取+语义解码"}
+            for off, a, v, sem in (parts.get("stackdump") or [])],
+        "heap_objects": parts.get("heap_typing"),
+        "holders": parts.get("holders"),
+        "locks": parts.get("locks"),
+        "addr_names": {("0x%x" % k): v
+                       for k, v in (parts.get("addr_names") or {}).items()},
+        "disasm": deepdive.get("disasm"),
+        "expr_evals": [{"expr": e, "output": out}
+                       for e, out in (deepdive.get("expr_evals") or [])],
+        "gdb_frames_full": deepdive.get("frames_full"),
+        "console": [{"line": ln, "text": txt}
+                    for ln, txt in (parts.get("console_hits") or [])[:40]],
+        "conclusions": parts.get("conclusions"),
+        "source_refs": parts.get("source_refs"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -454,20 +728,61 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
     # 技能状态
     rep.add_kv_table("技能状态", sorted(results["status"].items()))
 
-    # 崩溃线程寄存器
-    if crash:
-        regs = ["| 寄存器 | 值 |", "|---|---|"]
-        keys = [core.arch.reg_pc, core.arch.reg_sp, core.arch.reg_lr, core.arch.reg_fp]
-        for k in keys:
-            if k in crash.regs:
-                regs.append("| %s | 0x%x |" % (k, crash.regs[k]))
-        for k in ("x8", "a7", "r7", "orig_rax"):   # syscall 号寄存器（按架构命中其一）
-            if k in crash.regs:
-                regs.append("| %s(syscall号) | 0x%x |" % (k, crash.regs[k]))
-        for k in ("x0", "x1", "x2", "a0", "a1", "a2", "r0", "r1", "r2"):
-            if k in crash.regs:
-                regs.append("| %s | 0x%x |" % (k, crash.regs[k]))
-        rep.add("崩溃线程寄存器 (tid=%d)" % crash.tid, regs)
+    # 崩溃现场反汇编（deepdive：看崩溃指令的操作数来源）
+    dd = results.get("deepdive") or {}
+    if dd.get("disasm"):
+        lines = ["```"]
+        lines += dd["disasm"]
+        lines.append("```")
+        lines.append("> 崩溃指令前后的反汇编——出错的访存指令、它的基址/偏移寄存器，"
+                     "在这里一目了然。")
+        rep.add("崩溃现场反汇编", lines)
+
+    # 崩溃帧变量（gdb bt full 或 DIE 参数表）
+    fv = results.get("framevars")
+    if fv:
+        lines = []
+        if fv.get("confidence"):
+            lines.append("> 来源：%s（%s）" % (fv["source"], fv["confidence"]))
+        if fv.get("note"):
+            lines.append("> %s" % fv["note"])
+        for fr in fv.get("frames", []):
+            if not fr["vars"]:
+                continue
+            lines.append("")
+            lines.append("**#%d %s**%s" % (
+                fr["level"], fr["func"],
+                " @ %s" % fr["loc"] if fr.get("loc") else ""))
+            lines.append("| 变量 | 类型 | 值 | 语义 |")
+            lines.append("|---|---|---|---|")
+            for v in fr["vars"]:
+                lines.append("| %s | %s | `%s` | %s |" % (
+                    v["name"], v.get("kind", ""), v.get("value", ""),
+                    v.get("sem", "")))
+        if any(l.startswith(("**", "|")) for l in lines):
+            rep.add("崩溃帧变量 (framevars)", lines)
+
+    # 崩溃线程寄存器（全量语义解码版）
+    regs_deep = results.get("regs_deep") or []
+    if regs_deep:
+        lines = ["| 寄存器 | 值 | 语义 |", "|---|---|---|"]
+        for rn, v, sem in regs_deep:
+            lines.append("| %s | 0x%x | %s |" % (rn, v, sem))
+        rep.add("崩溃线程寄存器 (tid=%s，全量解码)" % (
+            crash.tid if crash else "?"), lines)
+
+    # 崩溃现场栈内存（SP 起逐字解码）
+    sd = results.get("stackdump") or []
+    if sd:
+        lines = ["| SP偏移 | 地址 | 值 | 语义 |", "|---|---|---|---|"]
+        for off, a, v, sem in sd[:40]:
+            lines.append("| +0x%03x | 0x%x | 0x%x | %s |" % (off, a, v, sem))
+        if len(sd) > 40:
+            lines.append("| ... | ... | ... | （共 %d 字，仅列前 40） |" % len(sd))
+        lines.append("")
+        lines.append("> 栈上每个字是什么：返回地址/局部变量/参数传递区/"
+                     "指向全局或堆的指针，逐字标注。")
+        rep.add("崩溃现场栈内存 (SP 起)", lines)
 
     # 线程现场还原（案发现场总览：每线程一行——在干什么/持什么/等什么/阻塞在哪）
     rows, _held_by, _wait_by = _scene_rows(core, results)
@@ -561,7 +876,7 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
                     from . import dieinfo as dieinfo_mod
                     _st = dieinfo_mod.struct_by_size(_exe_p, c.prev.size)
                     if _st:
-                        _members = ", ".join("0x%x:%s" % (o, m)
+                        _members = ", ".join("0x%x:%s" % (o, m[0])
                                              for o, m in sorted(_st[1].items())[:6])
                         lines.append("- 前块尺寸 0x%x 与 **struct %s** 匹配"
                                      "（DIE 证据；成员偏移：%s）"
@@ -574,6 +889,36 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
             lines.append("")
             lines.append("内容指纹：%s" % fp.desc)
         rep.add("堆取证 (glibc)", lines if lines else ["core 中无堆数据"])
+
+    # 堆对象还原（字段级结构化解码 + 持有链）
+    heap_typing = results.get("heap_typing") or []
+    holders = results.get("holders") or []
+    if heap_typing or holders:
+        lines = []
+        for obj in heap_typing:
+            lines.append("**对象还原：%s（%s，%s）**" % (
+                obj.get("type", "?"), obj.get("chunk", "?"),
+                "in-use" if obj.get("inuse") else "free"))
+            lines.append("| 偏移 | 成员 | 类型 | 运行时值 | 语义 |")
+            lines.append("|---|---|---|---|---|")
+            for f in obj.get("fields", []):
+                lines.append("| +0x%x | %s | %s | `%s` | %s |" % (
+                    f["offset"], f["name"], f["type"], f["value"], f["sem"]))
+            lines.append("> 证据：%s" % obj.get("evidence", "DIE"))
+            lines.append("")
+        for h in holders:
+            lines.append("- 持有链：%s" % h)
+        rep.add("堆对象还原 (heaptyping)", lines)
+
+    # gdb 表达式求值
+    if dd.get("expr_evals"):
+        lines = ["```"]
+        for expr, out in dd["expr_evals"]:
+            lines.append("(gdb) p %s" % expr)
+            lines += out[:12]
+            lines.append("")
+        lines.append("```")
+        rep.add("gdb 表达式求值", lines)
 
     # console 证据
     if results["console_hits"]:
@@ -590,7 +935,7 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
         lines.append("```")
         rep.add("源码片段 %s:%d" % (f, ln), lines)
 
-    # 变量生命周期（崩溃指针的静态溯源轨迹）
+    # 变量生命周期（崩溃指针的静态溯源轨迹 + 运行时值）
     var_events = results.get("var_events")
     if var_events:
         lines = []

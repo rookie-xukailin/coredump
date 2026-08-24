@@ -136,7 +136,7 @@ def find_mutexes(core, threads, progress=None, full_scan=False):
     seen = set()
     regions = [r for r in core.regions if r.readable and r.write_bit]
 
-    patterns = [(tid, re.compile(struct.pack("<I", tid)))
+    patterns = [(tid, re.compile(re.escape(struct.pack("<I", tid))))
                 for tid in sorted(known_tids)]
 
     for ri, r in enumerate(regions, 1):

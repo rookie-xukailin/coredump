@@ -167,8 +167,12 @@ def _check_if_called(sources, func_name):
 
 
 def trace_variable(source_root, crash_file, crash_line, crash_text,
-                   fault_addr=None):
+                   fault_addr=None, runtime_value=None, runtime_sem=None):
     """变量生命周期追踪主入口。
+
+    runtime_value/runtime_sem（可选）：崩溃行指针的运行时取值（来自
+    framevars 的 gdb bt full / DIE 参数表恢复）——把静态轨迹与运行时
+    现场接通，崩溃时刻事件据此生成。
 
     返回 list[dict]——每步是一个事件，按时间序排列。
     """
@@ -257,8 +261,24 @@ def trace_variable(source_root, crash_file, crash_line, crash_text,
         })
 
     # 第 7 步：崩溃时刻
-    if fault_addr is not None and fault_addr < 0x1000:
-        events.append({
+    crash_evt = None
+    if runtime_value is not None:
+        vt = "0x%x" % runtime_value if isinstance(runtime_value, int) else str(runtime_value)
+        crash_evt = {
+            "step": "crash",
+            "icon": "💥",
+            "title": "崩溃时刻（运行时值已恢复）",
+            "detail": "在 <code>%s:%d</code> 解引用了 <code>%s</code>，"
+                      "此时它的值是 <code>%s</code>%s（出错地址 0x%x）" % (
+                          os.path.basename(crash_file or "?"), crash_line, var,
+                          vt, "（%s）" % runtime_sem if runtime_sem else "",
+                          fault_addr if fault_addr is not None else 0),
+            "code": crash_text,
+            "file": os.path.basename(crash_file or ""), "line": crash_line,
+            "is_crash": True,
+        }
+    elif fault_addr is not None and fault_addr < 0x1000:
+        crash_evt = {
             "step": "crash",
             "icon": "💥",
             "title": "崩溃时刻",
@@ -268,7 +288,9 @@ def trace_variable(source_root, crash_file, crash_line, crash_text,
             "code": crash_text,
             "file": os.path.basename(crash_file or ""), "line": crash_line,
             "is_crash": True,
-        })
+        }
+    if crash_evt:
+        events.append(crash_evt)
 
     # 排序：声明 → 初始化 → 赋值 → 释放/置空 → 崩溃
     order = {"declaration": 0, "initialization": 1, "initialization_missing": 1,
@@ -287,5 +309,12 @@ def trace_variable(source_root, crash_file, crash_line, crash_text,
     if not root_cause and frees:
         root_cause = "%s 在 %s:%d 被释放后仍然被使用（Use-After-Free）" % (
             var, frees[0]["file"], frees[0]["line"])
+    # 运行时值与静态轨迹交叉：值非空但内存不可达 → 悬垂指针（UAF/已解映射）
+    if (not root_cause and isinstance(runtime_value, int) and runtime_value
+            and runtime_sem and ("未映射" in runtime_sem
+                                 or "已释放" in runtime_sem)):
+        root_cause = ("%s 崩溃时值为 0x%x（%s）——静态轨迹显示它曾有效，"
+                      "崩溃时指向的内存已不可达：悬垂指针（UAF/已解映射）"
+                      % (var, runtime_value, runtime_sem))
 
     return events, root_cause
