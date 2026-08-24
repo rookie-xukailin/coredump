@@ -126,6 +126,13 @@ class Config(object):
                     self.max_scan_depth = int(top[k])
                 else:
                     setattr(self, k, bool(top[k]))
+        for k in ("viz", "viz_port", "viz_timeout"):
+            if k in top and k not in self._toml_seen:
+                self._toml_seen.add(k)
+                if k == "viz":
+                    self.viz = bool(top[k])
+                else:
+                    setattr(self, k, int(top[k]))
         tc = data.get("toolchain", {})
         if isinstance(tc, dict):
             for k, v in tc.items():

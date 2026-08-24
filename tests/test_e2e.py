@@ -329,6 +329,22 @@ def test_config_merge_two_tomls():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_viz_toml_keys():
+    """viz/viz_port/viz_timeout 可进 toml（面板开关与端口/超时）。"""
+    from bmccore.config import Config
+    tmp = tempfile.mkdtemp()
+    try:
+        toml = os.path.join(tmp, "t.toml")
+        with io.open(toml, "w", encoding="utf-8") as f:
+            f.write("viz = true\nviz_port = 9000\nviz_timeout = 30\n")
+        cfg = Config()
+        cfg.update_from_toml(toml)
+        assert cfg.viz is True and cfg.viz_port == 9000 and cfg.viz_timeout == 30
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

@@ -198,6 +198,32 @@ def cmd_analyze(args):
             print("  报告: %s" % p)
         if cfg.keep_temp:
             print("  中间文件保留于: %s" % res.temp_dir)
+
+        # 可视化面板（--viz 或 toml 的 viz=true）：服务持续运行，Ctrl-C 结束
+        if getattr(args, "viz", False) or cfg.viz:
+            from bmccore.visualize import start_visualization
+            port = args.viz_port if args.viz_port is not None else cfg.viz_port
+            tmo = args.viz_timeout if args.viz_timeout is not None \
+                else cfg.viz_timeout
+            try:
+                server, _url = start_visualization(
+                    results["core"],
+                    heap_result=results["heap_result"],
+                    matches=results["matches"], traces=results["traces"],
+                    conclusions=results["conclusions"],
+                    cfi_frames=results["cfi_frames"],
+                    scan_results=results["scan_results"],
+                    source_root=cfg.source_root,
+                    snippets=results["snippets"],
+                    preferred_port=port, auto_open=True, timeout=tmo)
+                try:
+                    server.serve_forever()
+                except KeyboardInterrupt:
+                    print("\n面板已停止")
+                finally:
+                    server.server_close()
+            except RuntimeError as e:
+                print("可视化面板启动失败: %s" % e, file=sys.stderr)
         return 0
     finally:
         if not cfg.keep_temp:
@@ -243,6 +269,16 @@ def cmd_toolchain(args):
     if not any(tc.tools.values()):
         print("提示：可用 gdb/addr2line/objdump 逐项显式指定完整路径，绕过命名探测")
     return 0
+
+
+def cmd_viz(args):
+    """独立启动可视化：内部按 analyze 全流程跑一遍后带面板服务。"""
+    args.viz = True
+    args.viz_port = args.port if args.port is not None else None
+    args.viz_timeout = args.timeout if args.timeout is not None else None
+    if not hasattr(args, "debug"):
+        args.debug = False
+    return cmd_analyze(args)
 
 
 def main(argv=None):
@@ -293,20 +329,23 @@ def main(argv=None):
     p_an.add_argument("--max-scan-depth", type=int, default=None,
                       help="栈扫描最大深度（字节），默认65536")
     p_an.add_argument("--viz", action="store_true",
-                      help="分析完成后启动内存可视化 Web 面板")
-    p_an.add_argument("--viz-port", type=int, default=8080,
-                      help="可视化面板首选端口（被占用时自动+1，默认8080）")
-    p_an.add_argument("--viz-timeout", type=int, default=0,
-                      help="可视化面板超时秒数（0=持续运行，默认0）")
+                      help="分析完成后启动内存可视化 Web 面板（自动打开浏览器；"
+                           "服务持续运行 Ctrl-C 结束）")
+    p_an.add_argument("--viz-port", type=int, default=None,
+                      help="可视化面板首选端口（被占用时自动+1，默认 toml viz_port/8080）")
+    p_an.add_argument("--viz-timeout", type=int, default=None,
+                      help="可视化面板超时秒数（0=持续运行，默认 toml viz_timeout/0）")
     p_an.add_argument("--debuginfod-url",
                       help="debuginfod 服务器 URL（远程符号拉取）")
     p_an.set_defaults(func=cmd_analyze)
 
     p_viz = sub.add_parser("viz", parents=[common],
-                           help="单独启动内存可视化（需已生成报告）")
-    p_viz.add_argument("core", help="core 文件")
-    p_viz.add_argument("--port", type=int, default=8080, help="首选端口")
-    p_viz.add_argument("--timeout", type=int, default=0, help="超时秒（0=持续）")
+                           help="分析并启动可视化 Web 面板")
+    p_viz.add_argument("core", nargs="?", default=None,
+                       help="core 文件或 tar.gz 包（不填则用 bmccore.toml 的 core=）")
+    p_viz.add_argument("--port", type=int, default=None, help="首选端口")
+    p_viz.add_argument("--timeout", type=int, default=None, help="超时秒（0=持续）")
+    p_viz.set_defaults(func=cmd_viz)
 
     p_tc = sub.add_parser("toolchain", parents=[common],
                           help="交叉工具链探测自检（不分析 core）")
