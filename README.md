@@ -49,8 +49,8 @@ git clone <内网镜像> ~/Coredump
 cp -r ~/Coredump/swrd-skill-coredump-analyze ~/.codebuddy/skills/
 
 # 方式 B：导出精简包（含 INSTALL.md，适合内网 zip 摆渡分发）
-python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.4.0.zip
-unzip dist/swrd-skill-coredump-analyze-v3.4.0.zip -d ~/.codebuddy/skills/
+python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.5.0.zip
+unzip dist/swrd-skill-coredump-analyze-v3.5.0.zip -d ~/.codebuddy/skills/
 ```
 
 各 Agent 的技能目录（目录名保持 `swrd-skill-coredump-analyze`）：
@@ -202,6 +202,7 @@ python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --exe /路径/�
 # 保留中间文件（gdb 脚本等，排障用）
 python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --keep-temp
 python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --workdir <绝对路径>
+python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --config /绝对路径/bmccore.toml   # 参数全走配置，最短形态
 ```
 
 支持的全部参数：`python3.8 swrd-skill-coredump-analyze/bmccore.py analyze --help`

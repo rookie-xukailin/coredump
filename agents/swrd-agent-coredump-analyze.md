@@ -42,20 +42,20 @@ SKILL.md 的完整方法论（可直接 read_file，或经 use_skill 加载；�
 
 解释器统一用 `python3.8`（部分机器默认 python3 版本不一；仅当无
 python3.8 可执行文件且默认 python3 已 ≥3.8 时才用 python3）。
-解包/中间产物/报告统一放技能目录下的 workspace/（自动创建）：
+
+**首次**：把 symbol_table/source_root/workdir/output/offline/工具链写进
+`$WS/bmccore.toml`（模板见技能 SKILL.md 第 2 步；所有路径绝对路径），
+此后分析只需短命令（CLI 参数可临时覆盖配置）：
 
 ```bash
 BMCORE="<技能根目录>/bmccore.py"     # 均为绝对路径（技能根目录 = base directory）
 WS="<技能根目录>/workspace"
 
-python3.8 "$BMCORE" analyze <core文件> \
-    --symbol-table <符号表目录或rootfs_symbol.tgz> \
-    --source-root <源码树> \
-    [--console-log <串口日志>] \
-    --offline \
-    --workdir "$WS/intake" \
-    -o "$WS/report"
+python3.8 "$BMCORE" analyze <core文件> --config "$WS/bmccore.toml" \
+    [--console-log <串口日志>]
 ```
+
+（报告在 `$WS/report/` 下。）
 
 `--offline` 纯 Python 模式（零外部程序调用、零网络请求，适配内网）；
 机器上有交叉 gdb（aarch64-linux-gnu-gdb / gdb-multiarch）时可去掉，

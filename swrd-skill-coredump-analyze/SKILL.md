@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.4.0
+version: 3.5.0
 ---
 
 # Coredump 智能分析
@@ -83,28 +83,32 @@ version: 3.4.0
 ### 第 2 步：调用 bmccore 获取结构化数据
 
 ```bash
-# 引擎随技能包自带：<技能根目录> 即本 SKILL.md 所在目录
-BMCORE="<技能根目录>/bmccore.py"
-
-# 工作区：解包/中间产物/报告统一放技能目录下的 workspace/（自动创建）
-# --workdir/-o 必须用绝对路径：技能根目录取自技能加载时的 base directory，
-# 本身即绝对路径；你执行命令时 cwd 不确定，相对路径会落到意料之外的位置
-# 符号表传 tar 包（rootfs_symbol.tgz）时自动解到 "$WS/intake/symbols/" 下，
-# 源包 mtime/size 变化会自动重解，不会用错版本
+BMCORE="<技能根目录>/bmccore.py"    # 技能根目录 = 本 SKILL.md 所在目录（绝对路径）
 WS="<技能根目录>/workspace"
+```
 
-# 全量分析（--offline：纯 Python 模式，不依赖 gdb/addr2line 等任何外部程序，
-# 符号配对/CFI回溯/栈扫描/行号/堆取证全可用——内网/无交叉工具链环境默认用它）
-python3.8 "$BMCORE" analyze <core文件> \
-    --symbol-table <符号表目录或rootfs_symbol.tgz> \
-    --source-root <源码树> \
-    [--console-log <串口日志>] \
-    --offline \
-    --workdir "$WS/intake" \
-    -o "$WS/report"
+**首次分析（或路径变化时）先写一次配置** `$WS/bmccore.toml`——之后每次分析
+只需一条短命令，不再拼长参数（所有路径用绝对路径）：
 
-# 若机器上装有交叉 gdb（aarch64-linux-gnu-gdb / gdb-multiarch），
-# 去掉 --offline 可额外获得 gdb 精确回溯（工具链自动探测）
+```toml
+# <技能根目录>/workspace/bmccore.toml
+symbol_table = "/绝对路径/符号表目录或rootfs_symbol.tgz"  # tar 包自动解到 workdir 缓存
+source_root  = "/绝对路径/源码树"
+workdir      = "<技能根目录>/workspace/intake"            # 解包/中间产物
+output       = "<技能根目录>/workspace/report"            # 报告输出
+offline      = false   # 无交叉工具链设 true（纯Python零外部依赖）；配了工具链设 false
+
+# 有交叉工具链时配上（原生 addr2line 比纯 Python 建行号表快一个量级）：
+# [toolchain.riscv64]
+# gdb = "/opt/xxx/bin/riscv64-unknown-linux-gnu-gdb"
+# addr2line = "/opt/xxx/bin/riscv64-unknown-linux-gnu-addr2line"
+```
+
+**日常分析就一条短命令**（配置收拢全部参数；CLI 参数仍可临时覆盖配置）：
+
+```bash
+python3.8 "$BMCORE" analyze <core文件> --config "$WS/bmccore.toml" \
+    [--console-log <串口日志>]
 ```
 
 **确认技能根目录下存在 `bmccore.py`**；不存在说明技能包不完整，

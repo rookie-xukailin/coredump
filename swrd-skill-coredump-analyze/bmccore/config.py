@@ -71,6 +71,7 @@ class Config(object):
         self.skills = None           # None=全部
         self.crash_thread_only = False
         self.output = None
+        self.workdir = None         # 解包/中间文件目录（tar包符号表也解到这里）
         self.fmt = "both"
         self.keep_temp = False
         self.debug = False
@@ -87,11 +88,13 @@ class Config(object):
         data = load_toml(path)
         top = data.get("", {})
         for k in ("symbol_table", "source_root", "sysroot", "console_log", "exe",
-                  "glibc_version", "output"):
+                  "glibc_version", "output", "workdir"):
             if k in top and getattr(self, k) is None:
                 setattr(self, k, top[k])
         if "format" in top:
             self.fmt = top["format"]
+        if "offline" in top:
+            self.offline = bool(top["offline"])
         if "crash_thread_only" in top:
             self.crash_thread_only = bool(top["crash_thread_only"])
         if "max_scan_depth" in top:
@@ -110,14 +113,19 @@ class Config(object):
             "symbol_table": "symbol_table", "source_root": "source_root",
             "sysroot": "sysroot", "console_log": "console_log", "exe": "exe",
             "glibc_version": "glibc_version", "output": "output",
+            "workdir": "workdir",
             "fmt": "format", "crash_thread_only": "crash_thread_only",
-            "keep_temp": "keep_temp", "debug": "debug", "offline": "offline",
+            "keep_temp": "keep_temp", "debug": "debug",
             "max_scan_depth": "max_scan_depth",
         }
         for cli_k, attr in mapping.items():
             v = getattr(args, cli_k, None)
             if v is not None:
                 setattr(self, attr, v)
+        # --offline 是开关型参数（缺省 False）：只有显式给出才覆盖 toml，
+        # 避免"toml 配了 offline=true、命令未带 --offline"被静默翻回 False
+        if getattr(args, "offline", False):
+            self.offline = True
         # 兼容旧参数 --artifact-dir（符号表重构后被 --symbol-table 取代）
         art = getattr(args, "artifact_dir", None)
         if art is not None and self.symbol_table is None:

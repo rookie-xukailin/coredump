@@ -107,6 +107,29 @@ def test_symbol_table_archive():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_config_toml_short_command():
+    """bmccore.toml 收拢参数：analyze 只需 core + --config，workdir/output/offline 全走配置。"""
+    tmp = tempfile.mkdtemp()
+    try:
+        core_path, art = _build_arm64_env(tmp)
+        workdir = os.path.join(tmp, "ws")
+        outdir = os.path.join(tmp, "rep")
+        toml = os.path.join(tmp, "bmccore.toml")
+        with io.open(toml, "w", encoding="utf-8") as f:
+            f.write('symbol_table = "%s"\nworkdir = "%s"\noutput = "%s"\n'
+                    'offline = true\n' % (tmp, workdir, outdir))
+        from bmccore.cli import main
+        rc = main(["analyze", core_path, "--config", toml])
+        assert rc == 0
+        # workdir/output 均来自 toml
+        assert os.path.isdir(workdir), "toml 的 workdir 应生效（目录自动创建）"
+        assert any(n.endswith("_report.md") for n in os.listdir(outdir)), \
+            "toml 的 output 应作为报告目录"
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

@@ -14,6 +14,13 @@ source_root = "/home/bmc/src/bmc-project"
 # 固件staging根文件系统（so路径兜底 + libc识别）
 sysroot = "/home/bmc/build/rootfs"
 
+# 解包/中间文件目录（绝对路径；tar 包符号表也解到这里缓存复用）
+# workdir = "/home/bmc/core/workspace/intake"
+
+# 离线模式：true=纯 Python 不调用 gdb/addr2line（无交叉工具链时用）；
+# 机器上配了交叉工具链则保持 false（见下方 [toolchain.*]）
+# offline = false
+
 # 报告输出目录（默认core文件旁的 bmccore_report/）
 # output = "/home/bmc/reports"
 # format = "both"    # md / json / both

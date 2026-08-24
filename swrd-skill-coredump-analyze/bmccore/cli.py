@@ -83,7 +83,7 @@ def _fmt_size(n):
 
 
 def cmd_info(args):
-    workdir = getattr(args, "workdir", None)
+    workdir = getattr(args, "workdir", None) or _load_config(args).workdir
     if workdir:
         workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
         os.makedirs(workdir, exist_ok=True)
@@ -142,7 +142,7 @@ def cmd_analyze(args):
             print(msg, file=sys.stderr)
 
     cfg = _load_config(args)
-    workdir = getattr(args, "workdir", None)
+    workdir = getattr(args, "workdir", None) or cfg.workdir
     if workdir:
         workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
         os.makedirs(workdir, exist_ok=True)
