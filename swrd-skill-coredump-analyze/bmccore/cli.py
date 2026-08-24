@@ -19,6 +19,8 @@ from bmccore.config import Config
 from bmccore.intake import intake
 from bmccore.skills import Pipeline, build_report
 
+_SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 _SYM_ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".tar.xz")
 
 
@@ -198,6 +200,22 @@ def cmd_analyze(args):
             print("  报告: %s" % p)
         if cfg.keep_temp:
             print("  中间文件保留于: %s" % res.temp_dir)
+
+        # 交付提醒：叙事 HTML 是必产物（SKILL 完成标准 DoD），此处直接给
+        # 出可照抄的命令，Agent/人都应执行到 HTML 生成为止
+        eng_json = next((p for p in written if p.endswith(".json")),
+                        written[-1] if written else "<report.json>")
+        print("-" * 62)
+        print("  下一步（必做，直到 HTML 生成——见 SKILL 完成标准）：")
+        print("    1. 按 SKILL 叙事六步法写 %s%snarrative.json" % (outdir, os.sep))
+        print("    2. python3.8 %s%sscripts%srender_report.py "
+              "%s%snarrative.json --check   # 先校验字段"
+              % (_SKILL_ROOT, os.sep, os.sep, outdir, os.sep))
+        print("    3. python3.8 %s%sscripts%srender_report.py "
+              "%s%snarrative.json --engine \"%s\" "
+              "--out %s%s<案例名>_analysis.html"
+              % (_SKILL_ROOT, os.sep, os.sep, outdir, os.sep, eng_json,
+                 outdir, os.sep))
 
         # 可视化面板（--viz 或 toml 的 viz=true）：服务持续运行，Ctrl-C 结束
         if getattr(args, "viz", False) or cfg.viz:

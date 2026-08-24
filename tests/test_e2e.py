@@ -441,6 +441,40 @@ def test_dieinfo_naming():
     assert dieinfo.name_address("no/such/file", 0x7f42) is None    # 缺文件→空表降级
 
 
+def test_render_check():
+    """--check：字段齐全通过，缺必填项退出码 1 并点名缺失。"""
+    import subprocess
+    import json as _json
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tmp = tempfile.mkdtemp()
+    try:
+        good = {"summary": {"tldr": "x", "tldr_level": "确认"},
+                "scene": ["段落"], "root_cause": {"mechanism": "m"},
+                "fixes": [{"title": "t", "body": "b"}],
+                "confidence": [{"level": "确认", "claim": "c", "evidence": "e"}]}
+        p_good = os.path.join(tmp, "good.json")
+        with io.open(p_good, "w", encoding="utf-8") as f:
+            _json.dump(good, f, ensure_ascii=False)
+        bad = {"summary": {}, "root_cause": {}}
+        p_bad = os.path.join(tmp, "bad.json")
+        with io.open(p_bad, "w", encoding="utf-8") as f:
+            _json.dump(bad, f, ensure_ascii=False)
+        rr = os.path.join(root, "swrd-skill-coredump-analyze", "scripts",
+                          "render_report.py")
+        r1 = subprocess.run([sys.executable, rr, p_good, "--check"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert r1.returncode == 0 and "校验通过" in \
+            r1.stdout.decode("utf-8", "replace")
+        r2 = subprocess.run([sys.executable, rr, p_bad, "--check"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out2 = r2.stdout.decode("utf-8", "replace")
+        assert r2.returncode == 1
+        assert "tldr" in out2 and "scene" in out2 and "mechanism" in out2
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

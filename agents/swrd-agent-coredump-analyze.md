@@ -97,10 +97,14 @@ SKILL.md 的 4c 节，按需取用。
 回溯调用关系是否合理（防栈污染假帧）；崩溃线程≠肇事线程（多线程场景）；
 "疑似"结论能否经源码分析升级为"确认"或否定。
 
-### 5. 产出叙事 HTML 报告
+### 5. 产出叙事 HTML 报告（完成标准：三条全达成才算完成）
+
+**DoD**：① narrative.json 过 `render_report.py --check` 校验；② HTML 真实
+生成到 workspace/report/；③ 对话内已给 TL;DR+叙事全文+HTML 路径。任何
+一步失败必须说明并重试，不许静默只交 md。
 
 按 SKILL.md"叙事构建六步法"组装结果（线程角色表→逐线程业务动作→找
-共享对象→读读写点→A/B 因果链→缺口声明），写成 `narrative.json` 并渲染：
+共享对象→读读写点→A/B 因果链→缺口声明），写成 `narrative.json`：
 
 ```bash
 python3.8 <技能根目录>/scripts/render_report.py "$WS/report/narrative.json" \

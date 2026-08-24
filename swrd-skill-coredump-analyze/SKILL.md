@@ -1,10 +1,23 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.17.0
+version: 3.18.0
 ---
 
 # Coredump 智能分析
+
+## 完成标准（DoD）——三条全达成才算完成本次分析
+
+1. **narrative.json 已写并通过校验**：按第 5 步产出后执行
+   `python3.8 <技能根目录>/scripts/render_report.py <narrative.json> --check`，
+   必须返回"校验通过"
+2. **叙事 HTML 已生成**：render_report.py 渲染出真实存在的
+   `<workspace>/report/<案例名>_analysis.html`
+3. **已告知用户**：TL;DR + 现场还原叙事全文 + HTML 路径
+
+引擎 analyze 结束时会打印这三步的可照抄命令。任何一步失败（校验不过/
+模板缺失/命令报错）必须向用户说明原因并修复重试——**不许静默降级为
+只交 md 报告**。
 
 ## 技能包结构（自带完整引擎，无需单独部署工具）
 
@@ -793,6 +806,9 @@ assert(dst + sizeof(pat) <= g_led->curve + sizeof(g_led->curve));
 渲染 HTML（你不写 HTML，只写 JSON；报告落在 workspace/report/）：
 
 ```bash
+# ① 先校验（DoD 第 1 条，不过不许进下一步）
+python3.8 <技能根目录>/scripts/render_report.py "$WS/report/narrative.json" --check
+# ② 校验通过后渲染（DoD 第 2 条）
 python3.8 <技能根目录>/scripts/render_report.py "$WS/report/narrative.json" \
     --engine "$WS"/report/*_report.json \
     --out "$WS/report/<案例名>_analysis.html"

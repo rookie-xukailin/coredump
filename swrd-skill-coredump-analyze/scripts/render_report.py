@@ -109,6 +109,28 @@ def _load(path):
         return json.load(f)
 
 
+def check(narr):
+    """校验 narrative.json 必填/建议字段。返回 (errors, warnings)。"""
+    errors, warns = [], []
+    s = narr.get("summary") or {}
+    if not s.get("tldr"):
+        errors.append("summary.tldr 缺失（一句话根因）")
+    if not s.get("tldr_level"):
+        errors.append("summary.tldr_level 缺失（确认/疑似/建议）")
+    if not (narr.get("scene") or []):
+        errors.append("scene 缺失（现场还原叙事段落，至少 1 段）")
+    rc = narr.get("root_cause") or {}
+    if not rc.get("mechanism"):
+        errors.append("root_cause.mechanism 缺失（机制解释）")
+    if not (narr.get("fixes") or []):
+        warns.append("fixes 为空（应有可执行修复建议）")
+    if not (narr.get("confidence") or []):
+        warns.append("confidence 为空（应逐条标注可信度）")
+    if not (narr.get("thread_roles") or []):
+        warns.append("thread_roles 为空（多线程场景应有线程角色表）")
+    return errors, warns
+
+
 def render(narr, engine=None, case=None):
     s = narr.get("summary", {}) or {}
     case = case or narr.get("case") or s.get("process") or "coredump"
@@ -211,6 +233,18 @@ def main():
         else:
             i += 1
     narr = _load(narr_path)
+    if "--check" in args:
+        errors, warns = check(narr)
+        for w in warns:
+            print("WARN: %s" % w)
+        if errors:
+            for e in errors:
+                print("ERROR: %s" % e)
+            print("校验未通过：narrative.json 缺必填字段，先补全再渲染")
+            return 1
+        print("校验通过：必填字段齐全%s" %
+              ("（含 %d 条提醒）" % len(warns) if warns else ""))
+        return 0
     html = render(narr, engine, case)
     if not out:
         out = os.path.splitext(os.path.abspath(narr_path))[0] + "_analysis.html"
