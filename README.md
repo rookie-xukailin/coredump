@@ -66,6 +66,12 @@ unzip dist/swrd-skill-coredump-analyze-v3.1.0.zip -d ~/.codebuddy/skills/
 内网注意：分析默认 `--offline`（零外部程序调用、零网络请求）；不要设置
 `DEBUGINFOD_URLS` 或 `debuginfod_url`（默认关闭，配置后才会发起 HTTP 拉符号）。
 
+**配套子代理 `swrd-agent-coredump-analyze`**（`agents/swrd-agent-coredump-analyze.md`）：
+以独立上下文承接主 Agent 委派的完整分析任务，与技能共用同一引擎。
+安装：`cp agents/swrd-agent-coredump-analyze.md ~/.codebuddy/agents/`
+（Claude Code 对应 `.claude/agents/`；ZCode 在 设置→子代理 中创建同名子代理）。
+技能与子代理可只装其一，也可同时安装。
+
 ## 傻瓜式使用指南（从零开始，照抄即可）
 
 下面按"第一次用"和"日常用"两个场景给出可直接复制的完整命令。
