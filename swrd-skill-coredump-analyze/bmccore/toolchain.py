@@ -147,6 +147,10 @@ def discover(arch_name, config=None):
     tc_cfg = {}
     if config and config.toolchain:
         tc_cfg = config.toolchain.get(arch_name) or {}
+        if not tc_cfg and not offline:
+            notes.append("配置有 [toolchain.*] 但缺 [toolchain.%s] 节" % arch_name)
+    elif config is not None and not offline:
+        notes.append("配置未包含 [toolchain.*] 节")
     explicit = {t: tc_cfg.get(t) for t in _TOOLS if tc_cfg.get(t)}
     for t, p in explicit.items():
         p = os.path.expanduser(str(p))

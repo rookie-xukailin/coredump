@@ -72,6 +72,7 @@ def _load_config(args):
     if path and os.path.isfile(path):
         cfg.update_from_toml(path)
     cfg.update_from_cli(args)
+    cfg.config_path = path          # 记录实际加载的配置文件，供启动日志展示
     return cfg
 
 
@@ -154,6 +155,8 @@ def cmd_analyze(args):
         print("错误: 未指定 core 文件（位置参数，或 bmccore.toml 的 core=）",
               file=sys.stderr)
         return 2
+    log("[配置] 加载 %s" % (cfg.config_path or
+                            "无 bmccore.toml（全部走默认/CLI 参数）"))
     workdir = getattr(args, "workdir", None) or cfg.workdir
     if workdir:
         workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
@@ -203,7 +206,22 @@ def cmd_toolchain(args):
         tc_cfg = (cfg.toolchain or {}).get(arch) or {}
         path = tc_cfg.get("path") or tc_cfg.get("prefix")
         if not path:
-            print("未指定路径：位置参数，或 bmccore.toml [toolchain.%s] 的 path" % arch)
+            print("未从配置获得路径。自查信息：")
+            print("  实际加载的配置文件: %s" % (cfg.config_path or "无（没找到任何 bmccore.toml）"))
+            if cfg.toolchain:
+                print("  配置中的 [toolchain.*] 节: %s" % sorted(cfg.toolchain.keys()))
+                sec = cfg.toolchain.get(arch) or {}
+                if sec:
+                    print("  [toolchain.%s] 节的键: %s（缺 path/prefix 键？）"
+                          % (arch, sorted(sec.keys())))
+                else:
+                    print("  缺 [toolchain.%s] 节——检查节名拼写（注意是点分层级）" % arch)
+            else:
+                print("  配置里没有任何 [toolchain.*] 节——"
+                      "确认编辑的是上面这个文件，且已解注释 [toolchain.%s] 与 path 行"
+                      % arch)
+            print("提示：也可直接传目录自检探测逻辑：")
+            print("  python3.8 bmccore.py toolchain <工具链bin目录> --arch %s" % arch)
             return 2
     print("== 工具链探测自检（arch=%s）==" % arch)
     for ln in tc_mod.probe_diagnose(path, arch):

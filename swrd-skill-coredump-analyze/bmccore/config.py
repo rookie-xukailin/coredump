@@ -77,6 +77,7 @@ class Config(object):
     """全量配置（含默认值）。字段与 CLI 一一对应。"""
 
     def __init__(self):
+        self.config_path = None     # 实际加载的 bmccore.toml 路径（日志展示用）
         self.core = None             # 待分析 core 路径（可由 toml 指定，CLI 位置参数优先）
         self.symbol_table = None     # 符号表文件/目录的绝对路径（编译阶段单独产出）
         self.source_root = None
