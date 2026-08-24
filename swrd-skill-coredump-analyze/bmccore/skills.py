@@ -333,6 +333,51 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
                 regs.append("| %s | 0x%x |" % (k, crash.regs[k]))
         rep.add("崩溃线程寄存器 (tid=%d)" % crash.tid, regs)
 
+    # 线程现场还原（案发现场总览：每线程一行——在干什么/持什么/等什么）
+    lock_result = results.get("lock_result")
+    held_by = {}      # tid -> [lock_addr]
+    wait_by = {}      # tid -> [(lock_addr, holder_tid)]
+    if lock_result:
+        for lk in lock_result.locks:
+            held_by.setdefault(lk.owner_tid, []).append(lk.addr)
+        for e in lock_result.wait_graph:
+            wait_by.setdefault(e.waiter_tid, []).append((e.lock_addr, e.holder_tid))
+    tops = {}         # tid -> 顶部帧描述（新→旧）
+    for tr in results["traces"]:
+        funcs = [fr.func for fr in tr.frames[:3] if fr and fr.func]
+        if funcs:
+            tops[tr.lwp] = " ← ".join(funcs)
+    for tid, sr in results["scan_results"].items():
+        if tid in tops:
+            continue
+        names = []
+        for f in sr.frames[:3]:
+            nm = f.func or f.loc
+            if nm and nm not in names:
+                names.append(nm)
+        if names:
+            tops[tid] = " ← ".join(names)
+    if core.threads:
+        lines = ["| tid | 状态 | 顶部帧（新→旧） | 锁关系 |", "|---|---|---|---|"]
+        for t in core.threads:
+            state = "💥崩溃" if (crash and t.tid == crash.tid) else ""
+            lk_txt = []
+            for a in held_by.get(t.tid, [])[:3]:
+                lk_txt.append("持锁 0x%x" % a)
+            for a, h in wait_by.get(t.tid, [])[:3]:
+                lk_txt.append("等锁 0x%x(持有者T%d)" % (a, h))
+            if not core.region_of(t.sp):
+                top = "（栈未转储）"
+            else:
+                top = tops.get(t.tid) or "（无符号化帧）"
+            lines.append("| T%d | %s | %s | %s |" % (
+                t.tid, state, top, "；".join(lk_txt) or "-"))
+        lines.append("")
+        lines.append("> 现场还原：结合各线程顶部帧与锁关系还原案发时刻在做什么。"
+                     "崩溃线程≠肇事线程——重点看持锁/等锁的交叉关系与共享数据"
+                     "的访问路径。")
+        rep.add("线程现场还原 (%d 线程)" % len(core.threads), lines)
+
     # 模块配对
     if results["matches"]:
         lines = ["| 模块 | 设备路径 | 配对结果 | 产物 | 说明 |", "|---|---|---|---|---|"]

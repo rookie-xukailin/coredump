@@ -46,6 +46,7 @@ def test_e2e_analyze():
         content = io.open(md, "r", encoding="utf-8").read()
         # 关键节齐全
         assert "BMC Coredump 分析报告" in content
+        assert "线程现场还原" in content       # 案发现场总览节
         assert "定位结论" in content
         assert "堆取证" in content
         assert "chunk 头损坏" in content
