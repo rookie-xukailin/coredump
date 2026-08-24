@@ -20,31 +20,37 @@ _ARCH_PREFIXES = {
 
 _TOOLS = ("gdb", "addr2line", "objdump")
 
-# 架构 -> 工具文件名里必须包含的 triple 关键字（用于目录扫描时配对）
+# 架构 -> 工具文件名关键字的优先级组（外层按序尝试，组内任一命中即可）。
+# riscv/arm32 的第二组放宽到家族名，兼容 riscv-none-elf- / riscv-nuclei-elf- /
+# riscv-linux-musl- / arm-xxx- 等不带架构号前缀的商用/定制工具链。
 _ARCH_KEYS = {
-    "arm32": ("arm",),
-    "arm64": ("aarch64",),
-    "riscv64": ("riscv64",),
-    "riscv32": ("riscv32", "riscv64"),
+    "arm32": (("arm-linux", "armv7", "arm-none", "armeb"), ("arm",)),
+    "arm64": (("aarch64", "arm64"),),
+    "riscv64": (("riscv64", "rv64"), ("riscv",)),
+    "riscv32": (("riscv32", "rv32"), ("riscv",)),
 }
 
 
 def _probe_tool_dir(d, arch_name):
     """在目录 d 里找架构匹配的交叉工具，返回 {tool: 绝对路径}（只含找到的）。
 
-    匹配规则：优先 triple 前缀名（如 riscv64-unknown-linux-gnu-gdb，
-    要求文件名含架构关键字且以 -<tool> 结尾）；没有前缀名时接受目录内
-    裸名（gdb 优先 multiarch 变体）。
+    匹配规则：按架构关键字优先级组找 triple 前缀名（如
+    riscv64-unknown-linux-gnu-gdb）；没有前缀名时接受目录内裸名
+    （gdb 优先 multiarch 变体）。
     """
     try:
         names = os.listdir(d)
     except OSError:
         return {}
-    keys = _ARCH_KEYS.get(arch_name, (arch_name,))
+    groups = _ARCH_KEYS.get(arch_name, ((arch_name,),))
     tools = {}
     for t in _TOOLS:
-        cands = sorted(n for n in names
-                       if n.endswith("-%s" % t) and any(k in n for k in keys))
+        cands = []
+        for keys in groups:
+            cands = sorted(n for n in names
+                           if n.endswith("-%s" % t) and any(k in n for k in keys))
+            if cands:
+                break
         if cands:
             tools[t] = os.path.join(d, cands[0])
             continue
@@ -111,6 +117,9 @@ def discover(arch_name, config=None):
                 tools[t] = tools[t] or p
             if any(found.values()):
                 notes.append("路径 %s 自动发现" % p_path)
+            else:
+                notes.append("配置 path=%s 未匹配到任何工具（检查目录内文件命名，"
+                             "或改用 gdb/addr2line 逐项显式指定）" % p_path)
         elif p_path.endswith("-"):
             for t in _TOOLS:
                 cand = p_path + t

@@ -187,6 +187,15 @@ def test_toolchain_path_discovery():
         tc3 = discover("riscv64", _Cfg())                 # 以 - 结尾的完整前缀
         assert tc3.has("gdb") and tc3.tools["gdb"].endswith(
             "riscv64-unknown-linux-gnu-gdb")
+
+        # 家族名前缀（不带架构号，如 riscv-none-elf- / riscv-linux-）也能匹配
+        alt = os.path.join(tmp, "alt")
+        os.makedirs(alt)
+        for t in ("gdb", "addr2line", "objdump"):
+            io.open(os.path.join(alt, "riscv-none-elf-%s" % t), "w").close()
+        _Cfg.toolchain = {"riscv64": {"path": alt}}
+        tc4 = discover("riscv64", _Cfg())
+        assert tc4.has("gdb") and "riscv-none-elf-gdb" in tc4.tools["gdb"]
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
