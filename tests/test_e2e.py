@@ -273,6 +273,25 @@ def test_lockmon_find_mutexes():
     assert not any(l.addr == 0x10000000 + 0x200 for l in hits_full)
 
 
+def test_toolchain_diagnose():
+    """toolchain 自检：未命中时点名候选文件与架构关键字，命中时报文件名。"""
+    import tempfile
+    from bmccore import toolchain
+    tmp = tempfile.mkdtemp()
+    try:
+        for t in ("gdb", "addr2line"):
+            io.open(os.path.join(tmp, "x86_64-linux-gnu-%s" % t), "w").close()
+        text = "\n".join(toolchain.probe_diagnose(tmp, "riscv64"))
+        assert "未命中" in text and "x86_64-linux-gnu-gdb" in text, \
+            "未命中时应点名候选文件，便于定位命名差异"
+        io.open(os.path.join(tmp, "riscv64-unknown-linux-gnu-gdb"), "w").close()
+        text2 = "\n".join(toolchain.probe_diagnose(tmp, "riscv64"))
+        assert "命中 riscv64-unknown-linux-gnu-gdb" in text2
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

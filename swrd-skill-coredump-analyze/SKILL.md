@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.11.1
+version: 3.12.0
 ---
 
 # Coredump 智能分析
@@ -103,6 +103,8 @@ offline      = false   # 无交叉工具链设 true（纯Python零外部依赖�
 # [toolchain.riscv64]
 # path = "/opt/xxx/riscv-toolchain"    # 只给一个路径（根目录或 bin 目录），
 #                                      # 其下 riscv64-*-gdb 等自动发现配对
+# 工具链没配上时自检（逐工具显示命中/未命中原因与候选文件名）：
+#   python3.8 "$BMCORE" toolchain <目录> --arch riscv64
 ```
 
 **日常分析就一条短命令**（配置收拢全部参数；CLI 参数仍可临时覆盖配置。

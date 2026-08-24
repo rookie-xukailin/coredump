@@ -31,6 +31,58 @@ _ARCH_KEYS = {
 }
 
 
+def probe_diagnose(p_path, arch_name):
+    """人读诊断：给定路径与架构，逐工具说明命中/未命中原因。返回行列表。"""
+    lines = []
+    p_path = os.path.expanduser(str(p_path))
+    if not os.path.exists(p_path):
+        return ["路径不存在: %s" % p_path]
+    d = p_path if os.path.isdir(p_path) else None
+    if d is None:
+        if p_path.endswith("-"):
+            d = os.path.dirname(p_path)
+            lines.append("前缀形态（以 - 结尾），在其所在目录 %s 内检查" % d)
+        else:
+            return ["既非目录，也非以 - 结尾的前缀: %s" % p_path]
+    names = sorted(os.listdir(d))
+    tool_like = [n for n in names if any(n.endswith("-%s" % t) or n == t
+                                         for t in _TOOLS) or n == "gdb-multiarch"]
+    if not tool_like:
+        sub = os.path.join(d, "bin")
+        if os.path.isdir(sub):
+            lines.append("目录内无工具，转查子目录 %s" % sub)
+            d = sub
+            names = sorted(os.listdir(d))
+        else:
+            return ["目录 %s 内没有任何 gdb/addr2line/objdump 命名的文件（共 %d 项）"
+                    % (d, len(names))]
+    lines.append("目录 %s（%d 项，其中工具类命名 %d 个）："
+                 % (d, len(names), len([n for n in names
+                                        if any(n.endswith("-%s" % t) or n == t
+                                               for t in _TOOLS)])))
+    groups = _ARCH_KEYS.get(arch_name, ((arch_name,),))
+    for t in _TOOLS:
+        endsw = sorted(n for n in names
+                       if n.endswith("-%s" % t) or n == t
+                       or (t == "gdb" and n == "gdb-multiarch"))
+        if not endsw:
+            lines.append("  %-9s: 目录内没有 -%s 结尾/裸名的文件" % (t, t))
+            continue
+        hit = None
+        for keys in groups:
+            c = sorted(n for n in endsw if any(k in n for k in keys))
+            if c:
+                hit = c[0]
+                break
+        if hit:
+            lines.append("  %-9s: 命中 %s" % (t, hit))
+        else:
+            lines.append("  %-9s: 未命中——候选 %s 不含架构关键字 %s"
+                         % (t, ", ".join(endsw[:6]),
+                            ";".join("/".join(g) for g in groups)))
+    return lines
+
+
 def _probe_tool_dir(d, arch_name):
     """在目录 d 里找架构匹配的交叉工具，返回 {tool: 绝对路径}（只含找到的）。
 

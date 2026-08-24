@@ -193,6 +193,32 @@ def cmd_analyze(args):
             res.cleanup()
 
 
+def cmd_toolchain(args):
+    """工具链探测自检：逐工具说明命中/未命中原因，不分析 core。"""
+    from bmccore import toolchain as tc_mod
+    cfg = _load_config(args)
+    arch = args.arch
+    path = args.path
+    if not path:
+        tc_cfg = (cfg.toolchain or {}).get(arch) or {}
+        path = tc_cfg.get("path") or tc_cfg.get("prefix")
+        if not path:
+            print("未指定路径：位置参数，或 bmccore.toml [toolchain.%s] 的 path" % arch)
+            return 2
+    print("== 工具链探测自检（arch=%s）==" % arch)
+    for ln in tc_mod.probe_diagnose(path, arch):
+        print(ln)
+
+    class _ProbeCfg(object):
+        offline = False
+        toolchain = {arch: {"path": path}}
+    tc = tc_mod.discover(arch, _ProbeCfg())
+    print("探测结果: %r" % tc)
+    if not any(tc.tools.values()):
+        print("提示：可用 gdb/addr2line/objdump 逐项显式指定完整路径，绕过命名探测")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bmccore",
                                  description="BMC coredump 离线分析工具 (ARM32/ARM64/RISC-V)")
@@ -255,6 +281,16 @@ def main(argv=None):
     p_viz.add_argument("core", help="core 文件")
     p_viz.add_argument("--port", type=int, default=8080, help="首选端口")
     p_viz.add_argument("--timeout", type=int, default=0, help="超时秒（0=持续）")
+
+    p_tc = sub.add_parser("toolchain", parents=[common],
+                          help="交叉工具链探测自检（不分析 core）")
+    p_tc.add_argument("path", nargs="?", default=None,
+                      help="工具链根目录/bin 目录/以-结尾前缀"
+                           "（不填则用 toml [toolchain.<arch>] 的 path）")
+    p_tc.add_argument("--arch", default="riscv64",
+                      choices=("arm32", "arm64", "riscv64", "riscv32", "x86_64", "i386"),
+                      help="目标架构（默认 riscv64）")
+    p_tc.set_defaults(func=cmd_toolchain)
 
     args = ap.parse_args(argv)
     return args.func(args)
