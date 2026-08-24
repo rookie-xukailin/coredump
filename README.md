@@ -29,15 +29,15 @@ Markdown/JSON 定位报告 + Web 可视化面板。
 ## 快速开始（编译服务器）
 
 ```bash
-cp coredump-analyze/bmccore.toml.example bmccore.toml   # 配产物目录/源码树/sysroot/工具链
-python3 coredump-analyze/bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
+cp swrd-skill-coredump-analyze/bmccore.toml.example bmccore.toml   # 配产物目录/源码树/sysroot/工具链
+python3 swrd-skill-coredump-analyze/bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz
 ```
 
 详见 [docs/使用说明.md](docs/使用说明.md)。
 
 ## 作为 Agent 技能（Skill）使用
 
-**`coredump-analyze/` 目录就是一个自包含技能包**：`SKILL.md` 为入口，
+**`swrd-skill-coredump-analyze/` 目录就是一个自包含技能包**：`SKILL.md` 为入口，
 分析引擎（`bmccore.py` + `bmccore/` + 内置 `open/pyelftools`）随技能自带，
 零 pip 依赖，目标机器只需 Python 3.8+——适配内网/离线环境。
 
@@ -46,14 +46,14 @@ python3 coredump-analyze/bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar
 ```bash
 # 方式 A：clone 仓库后，把技能目录整个拷进 Agent 技能目录
 git clone <内网镜像> ~/Coredump
-cp -r ~/Coredump/coredump-analyze ~/.codebuddy/skills/
+cp -r ~/Coredump/swrd-skill-coredump-analyze ~/.codebuddy/skills/
 
 # 方式 B：导出精简包（含 INSTALL.md，适合内网 zip 摆渡分发）
-python3 tools/export_skill.py     # 产出 dist/coredump-analyze/ 和 dist/*-v3.0.0.zip
-unzip dist/coredump-analyze-skill-v3.0.0.zip -d ~/.codebuddy/skills/
+python3 tools/export_skill.py     # 产出 dist/swrd-skill-coredump-analyze/ 和 dist/*-v3.1.0.zip
+unzip dist/swrd-skill-coredump-analyze-v3.1.0.zip -d ~/.codebuddy/skills/
 ```
 
-各 Agent 的技能目录（目录名保持 `coredump-analyze`）：
+各 Agent 的技能目录（目录名保持 `swrd-skill-coredump-analyze`）：
 
 | Agent | 项目级 | 用户级 |
 |---|---|---|
@@ -93,7 +93,7 @@ which aarch64-linux-gnu-gdb gdb-multiarch    # 有任意一个就行
 
 ```bash
 cd ~/cores
-cp ~/Coredump/coredump-analyze/bmccore.toml.example bmccore.toml
+cp ~/Coredump/swrd-skill-coredump-analyze/bmccore.toml.example bmccore.toml
 vi bmccore.toml      # 只需要改下面 3 行
 ```
 
@@ -123,7 +123,7 @@ sysroot = "/home/bmc/build/rootfs"
 
 ```bash
 cd ~/cores
-python3 ~/Coredump/coredump-analyze/bmccore.py info 1_core-2078599821-remotexdp-6759.tar.gz
+python3 ~/Coredump/swrd-skill-coredump-analyze/bmccore.py info 1_core-2078599821-remotexdp-6759.tar.gz
 ```
 
 输出长这样（架构/信号/崩溃线程/已加载模块……）：
@@ -140,7 +140,7 @@ python3 ~/Coredump/coredump-analyze/bmccore.py info 1_core-2078599821-remotexdp-
 
 ```bash
 # 强烈建议带上串口日志：glibc 堆报错只打印在设备 stderr，core 里没有
-python3 ~/Coredump/coredump-analyze/bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz \
+python3 ~/Coredump/swrd-skill-coredump-analyze/bmccore.py analyze 1_core-2078599821-remotexdp-6759.tar.gz \
     --console-log console.log
 ```
 
@@ -180,22 +180,22 @@ python3 ~/Coredump/coredump-analyze/bmccore.py analyze 1_core-2078599821-remotex
 
 ```bash
 # 快速摘要（不解符号，秒出）
-python3 coredump-analyze/bmccore.py info <core文件或tar.gz包>
+python3 swrd-skill-coredump-analyze/bmccore.py info <core文件或tar.gz包>
 
 # 全量分析（自动读同目录/上层的 bmccore.toml）
-python3 coredump-analyze/bmccore.py analyze <core> [--console-log console.log]
+python3 swrd-skill-coredump-analyze/bmccore.py analyze <core> [--console-log console.log]
 
 # 手动指定符号表/源码（不想写 toml 时）
-python3 coredump-analyze/bmccore.py analyze <core> --symbol-table /符号表文件或目录 --source-root /源码树
+python3 swrd-skill-coredump-analyze/bmccore.py analyze <core> --symbol-table /符号表文件或目录 --source-root /源码树
 
 # 主程序配不上时强制指定
-python3 coredump-analyze/bmccore.py analyze <core> --exe /路径/主程序
+python3 swrd-skill-coredump-analyze/bmccore.py analyze <core> --exe /路径/主程序
 
 # 保留中间文件（gdb 脚本等，排障用）
-python3 coredump-analyze/bmccore.py analyze <core> --keep-temp
+python3 swrd-skill-coredump-analyze/bmccore.py analyze <core> --keep-temp
 ```
 
-支持的全部参数：`python3 coredump-analyze/bmccore.py analyze --help`
+支持的全部参数：`python3 swrd-skill-coredump-analyze/bmccore.py analyze --help`
 
 ## 依赖
 
@@ -212,7 +212,7 @@ python3 coredump-analyze/bmccore.py analyze <core> --keep-temp
 # 有网机器上打包（或直接 git archive / 复制目录）
 tar czf bmccore-offline.tar.gz --exclude=.git -C ~ bmccore
 # U盘/scp 送到编译服务器后解压，配置同"傻瓜式指南 场景A"，然后：
-python3 coredump-analyze/bmccore.py analyze 1_core-...tar.gz --offline
+python3 swrd-skill-coredump-analyze/bmccore.py analyze 1_core-...tar.gz --offline
 ```
 
 `--offline` = 纯 Python 模式，**保证不调用任何外部程序**（无网/无工具链
@@ -232,7 +232,7 @@ python3 coredump-analyze/bmccore.py analyze 1_core-...tar.gz --offline
 分析完成后加 `--viz` 启动 Web 仪表盘（自动检测可用端口，明确显示 IP:PORT）：
 
 ```bash
-python3 coredump-analyze/bmccore.py analyze core.tar.gz --symbol-table /path --viz
+python3 swrd-skill-coredump-analyze/bmccore.py analyze core.tar.gz --symbol-table /path --viz
 # 输出:
 #   📊 BMC Coredump 崩溃分析面板
 #   ➜ 本机:  http://localhost:8080

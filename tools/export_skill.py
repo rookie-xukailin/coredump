@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """导出可分发的精简技能包：python3 tools/export_skill.py
 
-技能包源目录为仓库内的 coredump-analyze/（自包含：SKILL.md 入口 +
+技能包源目录为仓库内的 swrd-skill-coredump-analyze/（自包含：SKILL.md 入口 +
 引擎 bmccore.py/bmccore//open/ + scripts/）。本脚本将其整体复制到
 dist/ 并附加安装说明与用户手册，打成 zip 供内网摆渡：
 
-    dist/coredump-analyze/                       ← 文件夹版
-    dist/coredump-analyze-skill-<version>.zip    ← 压缩版
+    dist/swrd-skill-coredump-analyze/                       ← 文件夹版
+    dist/swrd-skill-coredump-analyze-skill-<version>.zip    ← 压缩版
 
 仓库的开发资产（tests/tools/docs/README 等）不随技能分发。
 """
@@ -19,22 +19,22 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DIST = os.path.join(ROOT, "dist")
-PKG_NAME = "coredump-analyze"
+PKG_NAME = "swrd-skill-coredump-analyze"
 SRC = os.path.join(ROOT, PKG_NAME)
 DOC_FILE = os.path.join(ROOT, "docs", "使用说明.md")
 
-INSTALL_MD = """# coredump-analyze 技能安装说明
+INSTALL_MD = """# swrd-skill-coredump-analyze 技能安装说明
 
 本目录是自包含技能包：分析引擎（bmccore）已随包内置，无需 pip 安装，
-仅需目标机器有 Python 3.8+。把**整个 `coredump-analyze/` 目录**拷到
-对应 Agent 的技能目录即可（目录名保持 `coredump-analyze`）：
+仅需目标机器有 Python 3.8+。把**整个 `swrd-skill-coredump-analyze/` 目录**拷到
+对应 Agent 的技能目录即可（目录名保持 `swrd-skill-coredump-analyze`）：
 
 | Agent | 项目级（随仓库共享） | 用户级（个人全局） |
 |---|---|---|
-| CodeBuddy | `<项目>/.codebuddy/skills/coredump-analyze/` | `~/.codebuddy/skills/coredump-analyze/` |
-| Claude Code | `<项目>/.claude/skills/coredump-analyze/` | `~/.claude/skills/coredump-analyze/` |
-| ZCode | `<项目>/.zcode/skills/coredump-analyze/` | `~/.zcode/skills/coredump-analyze/` |
-| Codex/Cursor 等通用位 | `<项目>/.agents/skills/coredump-analyze/` | `~/.agents/skills/coredump-analyze/` |
+| CodeBuddy | `<项目>/.codebuddy/skills/swrd-skill-coredump-analyze/` | `~/.codebuddy/skills/swrd-skill-coredump-analyze/` |
+| Claude Code | `<项目>/.claude/skills/swrd-skill-coredump-analyze/` | `~/.claude/skills/swrd-skill-coredump-analyze/` |
+| ZCode | `<项目>/.zcode/skills/swrd-skill-coredump-analyze/` | `~/.zcode/skills/swrd-skill-coredump-analyze/` |
+| Codex/Cursor 等通用位 | `<项目>/.agents/skills/swrd-skill-coredump-analyze/` | `~/.agents/skills/swrd-skill-coredump-analyze/` |
 
 安装后验证（在技能目录内执行，应正常打印用法/版本信息）：
 
@@ -83,7 +83,7 @@ def main():
         f.write(INSTALL_MD)
 
     # 压缩包（放 dist/ 下，与文件夹版并列）
-    zip_base = os.path.join(DIST, "%s-skill" % PKG_NAME)
+    zip_base = os.path.join(DIST, PKG_NAME)
     zip_path = shutil.make_archive(zip_base, "zip", root_dir=DIST, base_dir=PKG_NAME)
     os.replace(zip_path, "%s-v%s.zip" % (zip_base, version))   # 覆盖旧版，支持重跑
 

@@ -42,7 +42,7 @@ def _iter_py_files(base):
 def test_py38_syntax_and_api():
     """自有代码 + vendored 库的 3.8 语法与 API 门禁。"""
     problems = []
-    pkg = os.path.join(ROOT, "coredump-analyze")
+    pkg = os.path.join(ROOT, "swrd-skill-coredump-analyze")
     targets = [_iter_py_files(os.path.join(pkg, "bmccore")),
                _iter_py_files(HERE),
                _iter_py_files(os.path.join(pkg, "open", "pyelftools"))]
@@ -88,7 +88,7 @@ def test_vendored_pyelftools_version_pinned():
     0.32+ 使用 match 语句等 3.10 语法。升级此依赖前必须：
     在真实 3.8 解释器上重跑 tests/run_all.py + CLI 冒烟，并更新本断言。
     """
-    init = os.path.join(ROOT, "coredump-analyze", "open", "pyelftools",
+    init = os.path.join(ROOT, "swrd-skill-coredump-analyze", "open", "pyelftools",
                         "elftools", "__init__.py")
     with open(init, encoding="utf-8") as f:
         src = f.read()

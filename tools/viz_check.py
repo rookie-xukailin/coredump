@@ -20,7 +20,7 @@ import time
 W = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") \
     else "/tmp/coredump_work"
 PROJ = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "coredump-analyze")
+                    "swrd-skill-coredump-analyze")
 sys.path.insert(0, PROJ)
 sys.path.insert(0, os.path.join(PROJ, "open", "pyelftools"))
 

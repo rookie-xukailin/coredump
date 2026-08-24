@@ -22,7 +22,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "coredump-analyze"))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "swrd-skill-coredump-analyze"))
 sys.path.insert(0, HERE)
 
 from system_manifest import CASES, ARCHS, EXPECT_ARCH          # noqa: E402
