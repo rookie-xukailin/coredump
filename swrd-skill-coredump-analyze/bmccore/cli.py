@@ -37,6 +37,7 @@ def _fmt_size(n):
 def cmd_info(args):
     workdir = getattr(args, "workdir", None)
     if workdir:
+        workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
         os.makedirs(workdir, exist_ok=True)
     res = intake(args.core, keep_temp=args.keep_temp, workroot=workdir)
     try:
@@ -95,6 +96,7 @@ def cmd_analyze(args):
     cfg = _load_config(args)
     workdir = getattr(args, "workdir", None)
     if workdir:
+        workdir = os.path.abspath(workdir)    # 相对路径按调用时 cwd 锚定，避免后续 cwd 变化
         os.makedirs(workdir, exist_ok=True)
     res = intake(args.core, keep_temp=True, workroot=workdir)
     try:
@@ -139,7 +141,7 @@ def main(argv=None):
     common.add_argument("--config", help="bmccore.toml 路径（默认向上查找）")
     common.add_argument("--workdir", metavar="PATH",
                         help="解包/中间文件目录（tar.gz 等压缩包解到该目录下，"
-                             "不存在则创建；默认系统临时目录）")
+                             "不存在则创建；请用绝对路径，默认系统临时目录）")
 
     p_info = sub.add_parser("info", parents=[common], help="快速摘要：架构/信号/线程/模块")
     p_info.add_argument("core", help="core 文件或 tar.gz 包")

@@ -45,7 +45,7 @@ python3.8 可执行文件且默认 python3 已 ≥3.8 时才用 python3）。
 解包/中间产物/报告统一放技能目录下的 workspace/（自动创建）：
 
 ```bash
-BMCORE="<技能根目录>/bmccore.py"
+BMCORE="<技能根目录>/bmccore.py"     # 均为绝对路径（技能根目录 = base directory）
 WS="<技能根目录>/workspace"
 
 python3.8 "$BMCORE" analyze <core文件> \

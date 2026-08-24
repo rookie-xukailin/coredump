@@ -201,7 +201,7 @@ python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --exe /路径/�
 
 # 保留中间文件（gdb 脚本等，排障用）
 python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --keep-temp
-python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --workdir <目录>
+python3.8 swrd-skill-coredump-analyze/bmccore.py analyze <core> --workdir <绝对路径>
 ```
 
 支持的全部参数：`python3.8 swrd-skill-coredump-analyze/bmccore.py analyze --help`

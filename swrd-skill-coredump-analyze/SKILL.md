@@ -86,6 +86,8 @@ version: 3.1.0
 BMCORE="<技能根目录>/bmccore.py"
 
 # 工作区：解包/中间产物/报告统一放技能目录下的 workspace/（自动创建）
+# --workdir/-o 必须用绝对路径：技能根目录取自技能加载时的 base directory，
+# 本身即绝对路径；你执行命令时 cwd 不确定，相对路径会落到意料之外的位置
 WS="<技能根目录>/workspace"
 
 # 全量分析（--offline：纯 Python 模式，不依赖 gdb/addr2line 等任何外部程序，
