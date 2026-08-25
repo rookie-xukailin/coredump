@@ -173,6 +173,20 @@ def check(narr):
                     "互等/等待环的依据——ring 仅当引擎锁分析节存在"
                     "'⚠ 死锁检测：线程 … 形成等待环'证据时才允许；"
                     "非死锁案件请删除 ring")
+    # 多候选回应纪律：引擎结论层给出根因候选（证据加权）时，
+    # hypotheses 应对每条逐一回应——排除的假设也是结论
+    hyps = narr.get("hypotheses")
+    if hyps:
+        for i, h in enumerate(hyps):
+            if not h.get("claim"):
+                errors.append("hypotheses[%d].claim 缺失（假设陈述）" % i)
+            st = h.get("status")
+            if st not in ("成立", "排除", "待验证"):
+                warns.append("hypotheses[%d].status 应为 成立/排除/待验证（现为 %r）"
+                             % (i, st))
+    elif narr.get("gaps"):
+        warns.append("gaps 非空但 hypotheses 为空——难案应对每个缺口给候选假设"
+                     "（claim/basis/verify/status），排除的假设也是结论")
     return errors, warns
 
 
@@ -223,6 +237,24 @@ def render(narr, engine=None, case=None):
         "<li>%s</li>" % _inline(_esc(g)) for g in narr.get("gaps") or [])) \
         or "<p>无已知缺口</p>"
 
+    hyps = narr.get("hypotheses") or []
+    if hyps:
+        rows = []
+        for h in hyps:
+            st = h.get("status", "待验证")
+            rows.append("<tr><td>%s</td><td>%s</td><td>%s</td>"
+                        "<td><span class='badge lv-%s'>%s</span></td></tr>"
+                        % (_inline(_esc(h.get("claim", ""))),
+                           _inline(_esc(h.get("basis", ""))),
+                           _inline(_esc(h.get("verify", ""))),
+                           _esc(st), _esc(st)))
+        hyps_html = ("<table><tr><th>候选假设</th><th>依据</th><th>验证动作"
+                     "</th><th>状态</th></tr>%s</table>"
+                     "<p class='ev'>排除的假设也是结论：每条都应有明确的"
+                     "成立/排除/待验证判定。</p>" % "".join(rows))
+    else:
+        hyps_html = "<p>（未提供候选假设回应）</p>"
+
     ev_html = ["<p class='ev'>以下为引擎原始取证（未经 AI 润色），供核对叙事证据：</p>"]
     if engine:
         for sec in engine.get("sections", []):
@@ -254,6 +286,7 @@ def render(narr, engine=None, case=None):
         "__ROOT_CAUSE__": rc_html,
         "__FIXES__": fixes_html,
         "__CONFIDENCE__": conf_html,
+        "__HYPOTHESES__": hyps_html,
         "__GAPS__": gaps_html,
         "__EVIDENCE__": "\n".join(ev_html),
         "__ANIM_JSON__": anim_json,

@@ -124,8 +124,11 @@ python3.8 <技能根目录>/scripts/render_report.py "$WS/report/narrative.json"
 ```
 
 narrative.json 字段：summary(tldr/tldr_level)/scene(叙事段落[])/
-thread_roles/root_cause(mechanism+culprit)/fixes/confidence/gaps——
-支持极简 markdown。对话里同时给 TL;DR + 叙事全文 + HTML 路径。
+thread_roles/root_cause(mechanism+culprit)/fixes/confidence/gaps/
+hypotheses(claim/basis/verify/status)——支持极简 markdown。
+**hypotheses 必须逐一回应引擎"根因候选假设（证据加权排序）"的每条**
+（成立/排除/待验证；排除的假设也是结论）。
+对话里同时给 TL;DR + 叙事全文 + HTML 路径。
 **禁止复述现象**；证据不足就如实写卡在哪、缺什么。
 
 ## 原则

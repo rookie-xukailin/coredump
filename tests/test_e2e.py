@@ -394,6 +394,12 @@ def test_render_report_smoke():
             "fixes": [{"title": "读侧加锁", "body": "```c\nlock();\n```"}],
             "confidence": [{"level": "确认", "claim": "UAF", "evidence": "指纹"}],
             "gaps": ["T15 业务动作无符号帧"],
+            "hypotheses": [
+                {"claim": "T15 释放了 T12 在遍历的节点", "basis": "锁交叉",
+                 "verify": "读 free 路径", "status": "成立"},
+                {"claim": "栈溢出", "basis": "SP 距底", "verify": "比对边界",
+                 "status": "排除"},
+            ],
         }
         narr_path = os.path.join(tmp, "narrative.json")
         with io.open(narr_path, "w", encoding="utf-8") as f:
@@ -416,8 +422,10 @@ def test_render_report_smoke():
         assert "遍历传感器链表" in html and "案发时刻" in html
         assert "线程现场还原" in html           # 引擎证据节并入
         assert "无关节" not in html             # 关键词过滤生效
+        assert "候选假设与验证" in html and "T15 释放了" in html
+        assert "lv-成立" in html and "lv-排除" in html   # 状态徽章
         for ph in ("__CASE__", "__TLDR__", "__SCENE__", "__EVIDENCE__",
-                   "__FIXES__", "__GAPS__"):
+                   "__FIXES__", "__GAPS__", "__HYPOTHESES__"):
             assert ph not in html, "占位符未替换: %s" % ph
     finally:
         import shutil
@@ -512,6 +520,29 @@ def test_render_check():
         out2 = r2.stdout.decode("utf-8", "replace")
         assert r2.returncode == 1
         assert "tldr" in out2 and "scene" in out2 and "mechanism" in out2
+
+        # gaps 非空但 hypotheses 为空 → WARN（不失败）；hypotheses
+        # 缺 claim → ERROR；状态非法 → WARN
+        gap_no_hyp = {"summary": {"tldr": "x", "tldr_level": "确认"},
+                      "scene": ["s.c:9"], "root_cause": {"mechanism": "m"},
+                      "gaps": ["g1"]}
+        p_gap = os.path.join(tmp, "gap.json")
+        with io.open(p_gap, "w", encoding="utf-8") as f:
+            _json.dump(gap_no_hyp, f, ensure_ascii=False)
+        rg = subprocess.run([sys.executable, rr, p_gap, "--check"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert rg.returncode == 0 and "候选假设" in \
+            rg.stdout.decode("utf-8", "replace")
+        hyp_bad = dict(gap_no_hyp)
+        hyp_bad["hypotheses"] = [{"verify": "v", "status": "不清楚"}]
+        p_hb = os.path.join(tmp, "hypbad.json")
+        with io.open(p_hb, "w", encoding="utf-8") as f:
+            _json.dump(hyp_bad, f, ensure_ascii=False)
+        rh = subprocess.run([sys.executable, rr, p_hb, "--check"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        outh = rh.stdout.decode("utf-8", "replace")
+        assert rh.returncode == 1 and "claim 缺失" in outh
+        assert "status 应为" in outh
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -587,6 +618,73 @@ def test_evidence_objrebuild_passthrough():
     # 空对象/缺省也不崩
     ev2 = _build_evidence(core, {})
     assert ev2["objrebuild"] is None and ev2["meta"]["gdb寄存器交叉校验"] is None
+
+
+def test_triage_evidence_weighted():
+    """证据加权多候选：评分排序、refs 人话链、事实条目置顶不参与排序。"""
+    from bmccore.triage import triage, Conclusion
+
+    class _R(object):
+        def __init__(self, va, sz):
+            self.vaddr = va; self.filesz = sz; self.memsz = sz
+            self.write_bit = False; self.exec_bit = False
+    core = type("C", (), {
+        "crash_thread": type("T", (), {"cursig": 11})(),
+        "siginfo": {"addr": 0x7f420018, "code": 1},
+        "regions": [_R(0, 0x1000)],
+        "region_of": lambda self, a: None,
+    })()
+    matches = []
+
+    # 组合证据：指令归因(verified=60) + 寄存器基址(55) + 堆布局受害对象(40)
+    inattr = {"parsed": True, "verified": True, "insn": "=> 0x100e: lw a5,0x18(a0)",
+              "base_reg": "a0", "base_val": 0x7f420000, "disp": 0x18,
+              "computed": 0x7f420018, "fault_addr": 0x7f420018,
+              "base_name": "全局 g_fan", "field_name": "fan_ctrl.set_pwm",
+              "source": "gdb 指令解析+寄存器"}
+    regs_deep = [("a0", 0x7f420000, "全局 g_fan")]
+    heap_typing = [{"role": "受害对象", "type": "fan_ctrl",
+                    "fields": [{"name": "set_pwm", "value": "0x5858"}]}]
+    frame = {"frames": [{"func": "fan_pwm_apply", "vars": []}]}
+    out = triage(core, matches, inattr_res=inattr, regs_deep=regs_deep,
+                 heap_typing=heap_typing, framevars=frame, heap_result=None)
+    # 事实条目在前且无分值；根因候选在后按分值降序
+    facts = [c for c in out if c.score == 0]
+    cands = [c for c in out if c.score > 0]
+    assert facts and facts[0].text.startswith("非法内存访问")
+    assert cands and cands == sorted(cands, key=lambda c: -c.score)
+    top = cands[0]
+    assert top.score == 100, "证据累加封顶 100（60+55+40 超限）"
+    assert top.confidence == "确认"                      # ≥75 确认
+    types = [r["type"] for r in top.refs]
+    assert types == ["指令归因", "寄存器", "堆布局"]
+    assert "fan_ctrl.set_pwm" in top.refs[0]["detail"]
+    assert "全局 g_fan" in top.refs[1]["detail"]
+    assert top.hypothesis and "初始化" in top.hypothesis   # 验证动作存在
+
+    # 仅 regs（无指令归因）也能成候选；未验证指令降分且降置信
+    inattr2 = dict(inattr, verified=False)
+    out2 = triage(core, matches, inattr_res=inattr2, regs_deep=regs_deep)
+    c2 = [c for c in out2 if c.score > 0][0]
+    assert c2.score == 85 and c2.confidence == "确认"
+
+    # 死锁是独立候选（与访存候选并列）
+    class _L(object):
+        deadlocks = [[type("E", (), {"waiter_tid": 1, "lock_addr": 0x42,
+                                     "holder_tid": 2})()]]
+    out3 = triage(core, matches, lock_result=_L(), inattr_res=inattr)
+    cand3 = [c for c in out3 if c.score > 0]
+    assert any("死锁" in c.text for c in cand3)
+    assert len(cand3) == 2                                 # 访存 + 死锁两条候选
+
+    # 无线程 → 单一事实
+    core2 = type("C", (), {"crash_thread": None})()
+    out4 = triage(core2, matches)
+    assert len(out4) == 1 and out4[0].score == 0
+
+    # 向后兼容：旧字段构造仍可用
+    old = Conclusion("x", "确认", "y")
+    assert old.score == 0 and old.refs == [] and old.hypothesis is None
 
 
 def test_cli_info_cmd():

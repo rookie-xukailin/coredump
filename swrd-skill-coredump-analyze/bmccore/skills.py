@@ -537,7 +537,11 @@ class Pipeline(object):
                                             lock_result=lock_result,
                                             framevars=framevars_res,
                                             regs_deep=regs_deep,
-                                            addr_names=addr_names)
+                                            addr_names=addr_names,
+                                            inattr_res=inattr_res,
+                                            objrebuild=objrebuild,
+                                            heap_typing=heap_typing,
+                                            stackdump=stackdump)
             self._mark("triage", "ok")
 
         # ---- 9. 源码联动 ----
@@ -692,7 +696,10 @@ class Pipeline(object):
             "objrebuild": objrebuild,
             "console_hits": console_hits,
             "conclusions": [{"confidence": c.confidence, "text": c.text,
-                             "evidence": c.evidence}
+                             "evidence": c.evidence,
+                             "score": getattr(c, "score", 0) or 0,
+                             "refs": getattr(c, "refs", None) or [],
+                             "verify": getattr(c, "hypothesis", "") or ""}
                             for c in conclusions],
             "source_refs": [{"file": f, "line": ln, "real": real}
                             for f, ln, real, _b in snippets],
@@ -1208,17 +1215,38 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
                      "是叙事的骨架素材——与运行时栈/堆证据交叉验证后采信。")
         rep.add("变量生命周期 (vartrace)", lines)
 
-    # 结论（指令级归因验证通过时置顶——最硬的一条证据）
-    concl = ["| 可信度 | 结论 | 依据 |", "|---|---|---|"]
-    _ia = results.get("inattr")
-    if _ia and _ia.get("parsed"):
-        from .inattr import describe as _ia_d
-        _t = _ia_d(_ia)
-        if _t:
-            concl.append("| %s | %s | 崩溃指令归因（gdb 指令解析+寄存器交叉） |"
-                         % ("确认" if _ia.get("verified") else "疑似", _t))
+    # 定位结论：事实条目 + 证据加权排序的根因候选
+    concl = ["| 可信度 | 结论 | 依据 | 分值 |", "|---|---|---|---|"]
+    ranked = []
     for c in results["conclusions"]:
-        concl.append("| %s | %s | %s |" % (c.confidence, c.text, c.evidence))
+        sc = getattr(c, "score", 0) or 0
+        if sc:
+            ranked.append(c)
+            concl.append("| %s | %s | %s | %d |" % (
+                c.confidence, c.text, c.evidence, sc))
+        else:
+            concl.append("| %s | %s | %s | - |" % (
+                c.confidence, c.text, c.evidence))
     rep.add("定位结论", concl, level=2)
+
+    # 根因候选的证据链 + 验证动作（供 LLM 在 narrative.hypotheses 逐一回应）
+    if ranked:
+        lines = []
+        for i, c in enumerate(ranked, 1):
+            lines.append("**候选 %d（分值 %d/%s）**：%s" % (
+                i, c.score, c.confidence, c.text))
+            for r in c.refs:
+                lines.append("- [%s] %s（%s）" % (
+                    r.get("type", "?"), r.get("detail", ""),
+                    r.get("source", "")))
+            if c.hypothesis:
+                lines.append("- 验证动作：%s" % c.hypothesis)
+            lines.append("")
+        lines.append("> 分值是证据硬度累加（指令归因60/寄存器55/gdb帧变量50/"
+                     "对象重建50/死锁环60/堆走查40…封顶100）；≥75 确认、"
+                     "≥45 疑似。叙事时须对每个候选逐一回应：成立→并入主链，"
+                     "排除→写明排除依据，待验证→给出验证结果（写入 "
+                     "narrative.hypotheses）。")
+        rep.add("根因候选假设（证据加权排序）", lines)
 
     return rep
