@@ -126,6 +126,14 @@ def check(narr):
     rc = narr.get("root_cause") or {}
     if not rc.get("mechanism"):
         errors.append("root_cause.mechanism 缺失（机制解释）")
+    # 硬门禁：业务源码证据——scene/mechanism/culprit 合计至少 1 处 file:line
+    blob = "\n".join(narr.get("scene") or []) + "\n" + \
+        (rc.get("mechanism") or "") + "\n" + (rc.get("culprit") or "")
+    if not re.search(r"[\w\-]+\.(?:c|h|cc|cpp|cxx|hpp):\d+", blob):
+        errors.append("业务源码证据缺失：scene/root_cause 中没有任何业务源码 "
+                      "file:line 引用（DoD 第 4 条硬门禁）。'崩溃在 glibc 内部'"
+                      "不是跳过读码的理由——用堆指纹/DIE 变量名/受害结构体把"
+                      "嫌疑指回业务模块并读码，或在 gaps 写明卡点")
     if not (narr.get("fixes") or []):
         warns.append("fixes 为空（应有可执行修复建议）")
     if not (narr.get("confidence") or []):

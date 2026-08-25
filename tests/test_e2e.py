@@ -458,12 +458,20 @@ def test_render_check():
     tmp = tempfile.mkdtemp()
     try:
         good = {"summary": {"tldr": "x", "tldr_level": "确认"},
-                "scene": ["段落"], "root_cause": {"mechanism": "m"},
+                "scene": ["T12 正在遍历链表（sensor.c:88）"],
+                "root_cause": {"mechanism": "读侧无锁（sensor.c:80）"},
                 "fixes": [{"title": "t", "body": "b"}],
                 "confidence": [{"level": "确认", "claim": "c", "evidence": "e"}]}
         p_good = os.path.join(tmp, "good.json")
         with io.open(p_good, "w", encoding="utf-8") as f:
             _json.dump(good, f, ensure_ascii=False)
+        # 无业务源码 file:line 引用：必须被 DoD 第 4 条硬门禁拦下
+        nocite = {"summary": {"tldr": "x", "tldr_level": "确认"},
+                  "scene": ["崩溃在 glibc 内部堆遍历"],
+                  "root_cause": {"mechanism": "堆链表损坏"}}
+        p_nocite = os.path.join(tmp, "nocite.json")
+        with io.open(p_nocite, "w", encoding="utf-8") as f:
+            _json.dump(nocite, f, ensure_ascii=False)
         bad = {"summary": {}, "root_cause": {}}
         p_bad = os.path.join(tmp, "bad.json")
         with io.open(p_bad, "w", encoding="utf-8") as f:
@@ -474,6 +482,11 @@ def test_render_check():
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert r1.returncode == 0 and "校验通过" in \
             r1.stdout.decode("utf-8", "replace")
+        r1b = subprocess.run([sys.executable, rr, p_nocite, "--check"],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out1b = r1b.stdout.decode("utf-8", "replace")
+        assert r1b.returncode == 1 and "业务源码证据缺失" in out1b, \
+            "无 file:line 引用的叙事必须被硬门禁拒绝"
         r2 = subprocess.run([sys.executable, rr, p_bad, "--check"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         out2 = r2.stdout.decode("utf-8", "replace")
