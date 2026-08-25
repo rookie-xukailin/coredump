@@ -50,7 +50,8 @@ def _throttled(log, every=2.0):
 
 ALL_SKILLS = ("symbols", "backtrace", "deepdive", "scan", "heap", "console",
               "locks", "dieinfo", "framevars", "regs", "stackdump",
-              "heaptyping", "triage", "source", "vartrace", "cfi", "viz")
+              "heaptyping", "inattr", "objrebuild", "triage", "source",
+              "vartrace", "cfi", "viz")
 
 
 def _serialize_locks(lock_result, addr_names):
@@ -136,54 +137,75 @@ class Pipeline(object):
 
         resolver = symbols_mod.SymbolResolver()
 
-        # ---- 2. GDB 精确回溯 ----
+        # ---- 2. gdb 深度取证（先跑：成功时回溯直接复用，省一个 gdb 进程）----
         traces = []
         raw_gdb = ""
         script = None
+        deepdive = None
+        _raw_dir = cfg.workdir or cfg.output or os.path.dirname(self.core_path)
+        if ("backtrace" in want or "deepdive" in want) and \
+                tchain.has("gdb") and exe_match and exe_match.artifact:
+            script = symbols_mod.gdb_symbol_script(exe_match.artifact, matches, core)
+            if cfg.sysroot:
+                script.insert(2, "set sysroot %s" % cfg.sysroot)
+        if "deepdive" in want and script:
+            from .deepdive import run_deepdive
+            self.log("[deepdive] gdb 深度取证（bt full/寄存器/反汇编/调用点）...")
+            _t0 = time.time()
+            fault = (core.siginfo or {}).get("addr")
+            deepdive = run_deepdive(
+                tchain.tools["gdb"], self.core_path, script,
+                core.crash_thread.tid if core.crash_thread else 0,
+                fault_addr=fault, max_frames=min(cfg.max_frames or 50, 15),
+                log=self.log,
+                timeout=getattr(cfg, "gdb_timeout", 0) or 400,
+                raw_dir=_raw_dir)
+            n_fv = sum(len(fr.get("locals", []))
+                       for tr in deepdive.get("frames_full", [])
+                       for fr in tr["frames"])
+            if deepdive.get("frames_full"):
+                self._mark("deepdive", "ok",
+                           "bt full %d 线程/%d 个变量值 + 反汇编%d行"
+                           "（全函数%d行/调用点%d行）+ 表达式%d"
+                           % (len(deepdive["frames_full"]), n_fv,
+                              len(deepdive.get("disasm", [])),
+                              len(deepdive.get("disasm_func", [])),
+                              len(deepdive.get("callsite", [])),
+                              len(deepdive.get("expr_evals", []))))
+            else:
+                self._mark("deepdive", "failed", "gdb 深度取证未取到数据")
+            self.log("[deepdive] 完成（耗时 %.1fs）" % (time.time() - _t0))
+        elif "deepdive" in want:
+            self._mark("deepdive", "skipped", "无 gdb 或主程序未配上符号")
+
+        # ---- 2.5 GDB 精确回溯（deepdive 已有 bt full 时转换复用，不再起进程）----
         if "backtrace" in want:
             if tchain.has("gdb") and exe_match and exe_match.artifact:
-                self.log("[回溯] 运行 %s ..." % tchain.tools["gdb"])
-                script = symbols_mod.gdb_symbol_script(exe_match.artifact, matches, core)
-                if cfg.sysroot:
-                    script.insert(2, "set sysroot %s" % cfg.sysroot)
-                crash_tid = core.crash_thread.tid if core.crash_thread else None
-                ok, traces, raw_gdb = run_backtrace(
-                    tchain.tools["gdb"], self.core_path, script, cfg.max_frames)
-                if not ok:
-                    self._mark("backtrace", "failed", "gdb 回溯失败（详见 --keep-temp）")
+                if deepdive and deepdive.get("frames_full"):
+                    from .backtrace import Frame, ThreadTrace
+                    for tr in deepdive["frames_full"]:
+                        tt = ThreadTrace(0, tr["lwp"])
+                        for fr in tr["frames"]:
+                            tt.frames.append(Frame(
+                                fr["level"], fr.get("addr"),
+                                fr.get("func") or "??", fr.get("loc")))
+                        traces.append(tt)
+                    self._mark("backtrace", "ok",
+                               "复用 deepdive bt full（省一个 gdb 进程，原始输出"
+                               "见 %s）" % os.path.join(_raw_dir, "gdb_raw_deepdive1.log"))
                 else:
-                    self._mark("backtrace", "ok")
+                    self.log("[回溯] 运行 %s ..." % tchain.tools["gdb"])
+                    ok, traces, raw_gdb = run_backtrace(
+                        tchain.tools["gdb"], self.core_path, script, cfg.max_frames,
+                        timeout=getattr(cfg, "gdb_timeout", 0) or None,
+                        raw_path=os.path.join(_raw_dir, "gdb_raw_backtrace.log"))
+                    if not ok:
+                        self._mark("backtrace", "failed", "gdb 回溯失败（原始输出见 gdb_raw_backtrace.log）")
+                    else:
+                        self._mark("backtrace", "ok")
             else:
                 self._mark("backtrace", "skipped",
                            "无 gdb 或主程序未配上符号" if not tchain.has("gdb") else "主程序未配上符号")
-
-        # ---- 2.5 gdb 深度取证（bt full/全寄存器/反汇编/栈内存/p 表达式）----
-        deepdive = None
-        if "deepdive" in want:
-            if tchain.has("gdb") and exe_match and exe_match.artifact:
-                from .deepdive import run_deepdive
-                self.log("[deepdive] gdb 深度取证（bt full/寄存器/现场）...")
-                _t0 = time.time()
-                fault = (core.siginfo or {}).get("addr")
-                deepdive = run_deepdive(
-                    tchain.tools["gdb"], self.core_path, script,
-                    core.crash_thread.tid if core.crash_thread else 0,
-                    fault_addr=fault, max_frames=min(cfg.max_frames or 50, 15),
-                    log=self.log)
-                n_fv = sum(len(fr.get("locals", []))
-                           for tr in deepdive.get("frames_full", [])
-                           for fr in tr["frames"])
-                if deepdive.get("frames_full"):
-                    self._mark("deepdive", "ok",
-                               "bt full %d 线程/%d 个变量值 + 反汇编%d行 + 表达式%d"
-                               % (len(deepdive["frames_full"]), n_fv,
-                                  len(deepdive.get("disasm", [])),
-                                  len(deepdive.get("expr_evals", []))))
-                else:
-                    self._mark("deepdive", "failed", "gdb 深度取证未取到数据")
-                self.log("[deepdive] 完成（耗时 %.1fs）" % (time.time() - _t0))
-            else:
-                self._mark("deepdive", "skipped", "无 gdb 或主程序未配上符号")
 
         # ---- 3. 栈扫描兜底 ----
         scan_results = {}      # tid -> ScanResult
@@ -423,6 +445,88 @@ class Pipeline(object):
         else:
             self._mark("heaptyping", "skipped", "无堆数据或未启用")
 
+        # ---- 7.9 崩溃指令操作数级归因（指令 → 基址寄存器 → 语义名）----
+        inattr_res = None
+        if deepdive and deepdive.get("disasm") and core.crash_thread and core.arch:
+            from . import inattr as inattr_mod
+            base_name = None
+            field_name = None
+            pre = inattr_mod.parse_operand(
+                core.arch.name,
+                inattr_mod.find_pc_line(deepdive["disasm"]) or "")
+            if pre:
+                _base, _disp = pre
+                _bv = (core.crash_thread.regs or {}).get(_base)
+                base_name = addr_names.get(_bv) if isinstance(_bv, int) else None
+                if not base_name and deepdive.get("frames_full"):
+                    _tr0 = next((t for t in deepdive["frames_full"]
+                                 if t["lwp"] == core.crash_thread.tid), None)
+                    if _tr0 and _tr0["frames"]:
+                        for nm, val in _tr0["frames"][0]["args"]:
+                            try:
+                                if int(str(val), 0) == _bv:
+                                    base_name = "参数 %s" % nm
+                                    break
+                            except (ValueError, TypeError):
+                                pass
+                # 字段名：受害对象（heaptyping）里偏移 == 指令偏移的成员
+                for obj in heap_typing:
+                    if obj.get("role") == "受害对象" and obj.get("type"):
+                        for fd in obj.get("fields", []):
+                            if fd.get("offset") == _disp:
+                                field_name = "%s.%s" % (obj["type"],
+                                                        fd.get("name"))
+                                break
+                    if field_name:
+                        break
+            inattr_res = inattr_mod.attribute_fault(
+                core.arch.name, deepdive["disasm"],
+                (core.siginfo or {}).get("addr"),
+                core.crash_thread.regs or {},
+                base_name=base_name, field_name=field_name)
+            self._mark("inattr", "ok" if inattr_res else "skipped",
+                       "指令级归因" if inattr_res else "无 PC 反汇编行")
+        else:
+            self._mark("inattr", "skipped", "无 gdb 反汇编")
+
+        # ---- 7.10 gdb 类型重建（ptype / p *(struct*)addr）----
+        objrebuild = None
+        if deepdive and script and tchain.has("gdb"):
+            cands = []
+            for obj in heap_typing:
+                _s = (obj.get("type") or "").replace("struct", "").strip()
+                if _s and _s not in cands:
+                    cands.append(_s)
+            _base_reg = _base_val = None
+            if inattr_res and inattr_res.get("parsed"):
+                _base_reg = inattr_res.get("base_reg")
+                _base_val = inattr_res.get("base_val")
+            _vic_addr = None
+            _vc = getattr(heap_result, "victim_chunk", None) if heap_result else None
+            _vr = getattr(heap_result, "victim_region", None) if heap_result else None
+            if _vc is not None and _vr is not None:
+                _vic_addr = _vr.vaddr + _vc.offset
+            if cands and deepdive.get("gdb_no") is not None:
+                from .deepdive import run_objrebuild
+                objrebuild = run_objrebuild(
+                    tchain.tools["gdb"], self.core_path, script,
+                    deepdive.get("gdb_no"), cands,
+                    base_reg=_base_reg, base_val=_base_val,
+                    victim_addr=_vic_addr, log=self.log,
+                    timeout=getattr(cfg, "gdb_timeout", 0) or 300,
+                    raw_dir=_raw_dir)
+                self._mark("objrebuild",
+                           "ok" if (objrebuild.get("ptypes")
+                                    or objrebuild.get("derefs")) else "skipped",
+                           "ptype %d / 解引用 %d" % (
+                               len(objrebuild.get("ptypes") or []),
+                               len(objrebuild.get("derefs") or [])))
+            else:
+                self._mark("objrebuild", "skipped",
+                           "无候选结构体" if not cands else "无崩溃线程 gdb 上下文")
+        else:
+            self._mark("objrebuild", "skipped", "无 gdb")
+
         # ---- 8. triage 结论（吃全部证据）----
         conclusions = []
         if "triage" in want:
@@ -584,6 +688,8 @@ class Pipeline(object):
             "holders": holders,
             "locks": _serialize_locks(lock_result, addr_names),
             "addr_names": addr_names,
+            "inattr": inattr_res,
+            "objrebuild": objrebuild,
             "console_hits": console_hits,
             "conclusions": [{"confidence": c.confidence, "text": c.text,
                              "evidence": c.evidence}
@@ -610,6 +716,8 @@ class Pipeline(object):
             "var_events": var_events,
             "var_root_cause": var_root,
             "addr_names": addr_names,
+            "inattr": inattr_res,
+            "objrebuild": objrebuild,
             "exe_artifact_path": exe_artifact_path,
             "deepdive": deepdive,
             "framevars": framevars_res,
@@ -648,10 +756,28 @@ def _build_evidence(core, parts):
     deepdive = parts.get("deepdive") or {}
     fault = (core.siginfo or {}).get("addr")
     sig = core.threads[0].cursig if core.threads else 0
+    # gdb 与 NT_PRSTATUS 寄存器一致性校验（两个引擎互证）
+    gdb_vs = None
+    if deepdive.get("registers") and core.crash_thread:
+        gregs = deepdive["registers"].get(core.crash_thread.tid) or []
+        gmap = {}
+        for rn, v, _raw in gregs:
+            gmap[rn] = v
+        same = diff = 0
+        for rn, v in (core.crash_thread.regs or {}).items():
+            if rn in gmap and isinstance(v, int) and isinstance(gmap[rn], int):
+                if gmap[rn] == v:
+                    same += 1
+                else:
+                    diff += 1
+        if same or diff:
+            gdb_vs = "一致 %d 个 / 不一致 %d 个%s" % (
+                same, diff, "（以 NT_PRSTATUS 为准）" if diff else "")
     return {
         "meta": {
             "说明": "全量证据包：gdb+Python 双引擎取证，供 LLM 根因推断与面板展示",
             "可信度约定": "确认=DWARF/gdb 精确证据；启发式=Python 推断（标注于各条目）",
+            "gdb寄存器交叉校验": gdb_vs,
         },
         "summary": {
             "signal": sig,
@@ -676,6 +802,13 @@ def _build_evidence(core, parts):
         "addr_names": {("0x%x" % k): v
                        for k, v in (parts.get("addr_names") or {}).items()},
         "disasm": deepdive.get("disasm"),
+        "disasm_func": deepdive.get("disasm_func"),
+        "callsite": deepdive.get("callsite"),
+        "gdb_stack_hex": deepdive.get("stack_hex"),
+        "fault_mem": deepdive.get("fault_mem"),
+        "inattr": parts.get("inattr"),
+        "objrebuild": ({"ptypes": p, "derefs": d}
+                       if parts.get("objrebuild") else None),
         "expr_evals": [{"expr": e, "output": out}
                        for e, out in (deepdive.get("expr_evals") or [])],
         "gdb_frames_full": deepdive.get("frames_full"),
@@ -783,15 +916,78 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
     # 技能状态
     rep.add_kv_table("技能状态", sorted(results["status"].items()))
 
-    # 崩溃现场反汇编（deepdive：看崩溃指令的操作数来源）
+    # 崩溃现场反汇编（deepdive：PC 邻域 + 全函数 + 调用点现场）
     dd = results.get("deepdive") or {}
     if dd.get("disasm"):
         lines = ["```"]
         lines += dd["disasm"]
         lines.append("```")
+        if dd.get("disasm_func"):
+            lines.append("")
+            lines.append("**崩溃函数完整反汇编**（看参数如何装进寄存器、"
+                         "对象从哪来；全文在证据包 disasm_func）——"
+                         "前 %d 行：" % min(60, len(dd["disasm_func"])))
+            lines.append("```")
+            lines += dd["disasm_func"][:60]
+            lines.append("```")
+        if dd.get("callsite"):
+            lines.append("")
+            lines.append("**上层调用点现场**（frame 1 的 PC 前 10 条——"
+                         "看调用发生时参数装载）：")
+            lines.append("```")
+            lines += dd["callsite"]
+            lines.append("```")
         lines.append("> 崩溃指令前后的反汇编——出错的访存指令、它的基址/偏移寄存器，"
                      "在这里一目了然。")
         rep.add("崩溃现场反汇编", lines)
+
+    # 崩溃指令操作数级归因（指令 → 基址寄存器 → 语义名 → 字段）
+    ia = results.get("inattr")
+    if ia:
+        from .inattr import describe as _ia_desc
+        _d = _ia_desc(ia)
+        if _d:
+            lines = ["**%s**" % _d, ""]
+            if ia.get("base_name"):
+                lines.append("- 基址语义名：%s" % ia["base_name"])
+            if ia.get("field_name"):
+                lines.append("- 偏移对应字段：%s" % ia["field_name"])
+            lines.append("- 验证：基址 %s=0x%x + 0x%x = 0x%x%s"
+                         % (ia.get("base_reg"), ia.get("base_val") or 0,
+                            ia.get("disp") or 0, ia.get("computed") or 0,
+                            " == 出错地址 ✓" if ia.get("verified")
+                            else " ≠ 出错地址（疑似）"))
+            lines.append("")
+            lines.append("> 来源：gdb 指令解析 + NT_PRSTATUS 寄存器交叉"
+                         "（指令语法未匹配时会如实标注）。")
+            rep.add("崩溃指令归因 (指令级)", lines)
+
+    # 对象还原（gdb 类型重建：ptype / p *(struct*)addr）
+    ob = results.get("objrebuild")
+    if ob and (ob.get("ptypes") or ob.get("derefs")):
+        lines = []
+        for expr, out in ob.get("ptypes") or []:
+            lines.append("**%s**" % expr)
+            lines.append("```")
+            lines += out
+            lines.append("```")
+        for expr, out in ob.get("derefs") or []:
+            lines.append("**%s**（运行时值按 DWARF 类型重建）" % expr)
+            lines.append("```")
+            lines += out
+            lines.append("```")
+        lines.append("> 置信度：确认（gdb+DWARF）——比 heaptyping 的尺寸"
+                     "启发式匹配强一档，可消歧同尺寸结构体。")
+        rep.add("对象还原 (gdb 类型重建)", lines)
+
+    # 出错地址附近内存（gdb 直读）
+    if dd.get("fault_mem"):
+        lines = ["```"]
+        lines += dd["fault_mem"]
+        lines.append("```")
+        lines.append("> gdb 直读出错地址周边 8 个字（不可读时为 gdb 报错原文，"
+                     "如实保留）。")
+        rep.add("出错地址附近内存 (gdb)", lines)
 
     # 崩溃帧变量（gdb bt full 或 DIE 参数表）
     fv = results.get("framevars")
@@ -1012,8 +1208,15 @@ def build_report(results, cfg, intake_meta=None, source_name=None):
                      "是叙事的骨架素材——与运行时栈/堆证据交叉验证后采信。")
         rep.add("变量生命周期 (vartrace)", lines)
 
-    # 结论
+    # 结论（指令级归因验证通过时置顶——最硬的一条证据）
     concl = ["| 可信度 | 结论 | 依据 |", "|---|---|---|"]
+    _ia = results.get("inattr")
+    if _ia and _ia.get("parsed"):
+        from .inattr import describe as _ia_d
+        _t = _ia_d(_ia)
+        if _t:
+            concl.append("| %s | %s | 崩溃指令归因（gdb 指令解析+寄存器交叉） |"
+                         % ("确认" if _ia.get("verified") else "疑似", _t))
     for c in results["conclusions"]:
         concl.append("| %s | %s | %s |" % (c.confidence, c.text, c.evidence))
     rep.add("定位结论", concl, level=2)

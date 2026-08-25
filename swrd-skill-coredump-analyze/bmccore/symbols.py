@@ -228,7 +228,12 @@ def gdb_symbol_script(exe_artifact, matches, core):
 
     exe 用 file；so 用 add-symbol-file（.text 的运行时地址）。
     """
-    lines = ["set pagination off", "set confirm off", "set print demangle on"]
+    lines = ["set pagination off", "set confirm off", "set print demangle on",
+             # 输出量保护：bt full 遇到大数组/长字符串局部变量会拖爆超时。
+             # 老版本 gdb 不认识 set max-value-size 时仅告警，不致命。
+             "set print elements 64",
+             "set max-value-size 8192",
+             "set print pretty on"]
     if exe_artifact:
         lines.append("file %s" % exe_artifact.path)
     for m in matches:

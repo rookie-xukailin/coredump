@@ -18,6 +18,7 @@ offline      = false  # 无交叉工具链改 true（纯 Python 零外部依赖�
 # viz = false             # true=分析完成后自动弹浏览器打开可视化面板（服务持续运行，Ctrl-C 结束）
 # viz_port = 8080         # 面板首选端口（被占用自动+1）
 # viz_timeout = 0         # 面板超时秒（0=持续运行；无人值守场景建议设秒数）
+# gdb_timeout = 400       # 每个 gdb 进程超时秒（bt full/反汇编等；大 core 可调大）
 
 # ---- 交叉工具链（推荐：只给一个路径，gdb/addr2line/objdump 在其下自动发现）----
 # [toolchain.riscv64]

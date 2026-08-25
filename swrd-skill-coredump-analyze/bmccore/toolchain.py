@@ -246,12 +246,25 @@ def run(tool, args, timeout=120):
         return 127, str(e)
 
 
-def gdb_batch(gdb_path, script_lines, timeout=180):
-    """以 batch 模式跑 gdb 脚本，返回 (ok, output)。"""
+def gdb_batch(gdb_path, script_lines, timeout=180, raw_path=None):
+    """以 batch 模式跑 gdb 脚本，返回 (ok, output)。
+
+    raw_path 给定时把 gdb 原始输出（stdout+stderr）落盘留档——审计
+    "哪些结论来自 gdb"的第一手材料，默认由调用方写 workspace/intake。
+    """
     args = ["-batch", "-nx"]
     for line in script_lines:
         args += ["-ex", line]
     rc, out = run(gdb_path, args, timeout=timeout)
+    if raw_path:
+        try:
+            d = os.path.dirname(raw_path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(raw_path, "w", encoding="utf-8") as f:
+                f.write("$ %s -batch ...\n\n%s" % (gdb_path, out))
+        except OSError:
+            pass                 # 留档失败不影响分析
     return rc == 0, out
 
 

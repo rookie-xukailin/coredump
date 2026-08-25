@@ -104,6 +104,7 @@ class Config(object):
         self.viz = False             # 是否启动可视化
         self.viz_port = 8080         # 可视化首选端口
         self.viz_timeout = 0         # 可视化超时（秒）
+        self.gdb_timeout = 400       # 每个 gdb 进程的超时（秒）
 
     # ------------------------------------------------------------------
     def update_from_toml(self, path):
@@ -126,7 +127,7 @@ class Config(object):
                     self.max_scan_depth = int(top[k])
                 else:
                     setattr(self, k, bool(top[k]))
-        for k in ("viz", "viz_port", "viz_timeout"):
+        for k in ("viz", "viz_port", "viz_timeout", "gdb_timeout"):
             if k in top and k not in self._toml_seen:
                 self._toml_seen.add(k)
                 if k == "viz":

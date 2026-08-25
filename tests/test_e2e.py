@@ -497,6 +497,56 @@ def test_render_check():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_inattr_operand_attribution():
+    """指令操作数级归因：四架构正则 + 寄存器交叉验证 + 语义命名。"""
+    from bmccore import inattr
+
+    # riscv：lw a5,0x18(a0)，a0=0x7f420000 → fault=0x7f420018（验证一致）
+    disasm = ["   0x100a: addi sp,sp,-16",
+              "=> 0x100e: lw a5,0x18(a0)",
+              "   0x1012: sw a5,0x0(a1)"]
+    attr = inattr.attribute_fault("riscv64", disasm, 0x7f420018,
+                                  {"a0": 0x7f420000}, base_name="参数 dev",
+                                  field_name="fan_ctrl.set_pwm")
+    assert attr and attr["parsed"] and attr["verified"]
+    assert attr["base_reg"] == "a0" and attr["disp"] == 0x18
+    d = inattr.describe(attr)
+    assert "参数 dev" in d and "fan_ctrl.set_pwm" in d and "一致" in d
+
+    # arm64：ldr x0,[x1,#24]
+    p = inattr.parse_operand("arm64", "=> 0x8c: ldr x0, [x1, #24]")
+    assert p == ("x1", 24)
+    # arm32 无偏移 → disp=0
+    p = inattr.parse_operand("arm32", "=> 0x8040: ldr r3, [r2]")
+    assert p == ("r2", 0)
+    # x86 att：mov 0x18(%rcx),%rax（% 前缀剥掉）
+    p = inattr.parse_operand("x86_64", "=> 0x4012a0: mov 0x18(%rcx),%rax")
+    assert p == ("rcx", 0x18)
+    # riscv 负偏移
+    p = inattr.parse_operand("riscv64", "=> 0x10: ld a0,-8(a2)")
+    assert p == ("a2", -8)
+    # 非访存指令 → parsed=False 如实降级
+    attr2 = inattr.attribute_fault("riscv64", ["=> 0x10: ecall"], None, {})
+    assert attr2 and attr2["parsed"] is False
+    # 验证不一致 → 疑似
+    attr3 = inattr.attribute_fault("riscv64", disasm, 0xdeadbeef, {"a0": 0x7f420000})
+    assert attr3["verified"] is False and "疑似" in inattr.describe(attr3)
+    # 无 => PC 行 → None
+    assert inattr.attribute_fault("riscv64", ["0x10: nop"], None, {}) is None
+
+
+def test_deepdive_frame_addr_capture():
+    """bt full 帧头地址捕获（backtrace 复用转换需要 addr 字段）。"""
+    from bmccore.deepdive import parse_bt_full
+    text = ("Thread 1 (LWP 100):\n"
+            "#0  0x0000000000012345 in sensor_read (dev=0x7f42) at s.c:88\n"
+            "        n = 3\n")
+    tr = parse_bt_full(text)
+    assert tr and tr[0]["frames"][0]["addr"] == 0x12345
+    assert tr[0]["frames"][0]["args"] == [("dev", "0x7f42")]
+    assert tr[0]["frames"][0]["locals"] == [("n", "3")]
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

@@ -71,14 +71,20 @@ def parse_bt_output(text):
     return traces
 
 
-def run_backtrace(gdb_path, core_path, symbol_script, max_frames=50):
+def run_backtrace(gdb_path, core_path, symbol_script, max_frames=50,
+                  timeout=None, raw_path=None):
     """跑 gdb 回溯；返回 (ok, traces, raw_output)。"""
     script = list(symbol_script) + [
         "core %s" % core_path,
         "echo \\n=====BT=====\\n",
         "thread apply all bt %d" % max_frames,
     ]
-    ok, out = tc.gdb_batch(gdb_path, script, timeout=240)
+    kw = {}
+    if timeout:
+        kw["timeout"] = timeout
+    if raw_path:
+        kw["raw_path"] = raw_path
+    ok, out = tc.gdb_batch(gdb_path, script, **kw)
     if "=====BT=====" in out:
         bt_part = out.split("=====BT=====", 1)[1]
         traces = parse_bt_output(bt_part)
