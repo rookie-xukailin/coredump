@@ -567,6 +567,28 @@ def test_deepdive_frame_addr_capture():
     assert tr[0]["frames"][0]["locals"] == [("n", "3")]
 
 
+def test_evidence_objrebuild_passthrough():
+    """证据包对 objrebuild（dict）透传不崩——防 NameError 类回归。"""
+    from bmccore.skills import _build_evidence
+
+    class _T(object):
+        regs = {"a0": 1}
+        cursig = 11
+        tid = 7
+    core = type("C", (), {
+        "siginfo": {}, "threads": [_T], "crash_thread": _T, "prpsinfo": {},
+        "arch": type("A", (), {"name": "riscv64"})()})()
+    parts = {"objrebuild": {"ptypes": [("ptype struct s", ["l1"])],
+                            "derefs": [("p *(struct s*)0", ["v=1"])]},
+             "regs_deep": [], "stackdump": [], "inattr": None}
+    ev = _build_evidence(core, parts)
+    assert ev["objrebuild"]["ptypes"][0][0] == "ptype struct s"
+    assert ev["objrebuild"]["derefs"][0][1] == ["v=1"]
+    # 空对象/缺省也不崩
+    ev2 = _build_evidence(core, {})
+    assert ev2["objrebuild"] is None and ev2["meta"]["gdb寄存器交叉校验"] is None
+
+
 def test_cli_info_cmd():
     tmp = tempfile.mkdtemp()
     try:

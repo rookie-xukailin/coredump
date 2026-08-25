@@ -807,8 +807,8 @@ def _build_evidence(core, parts):
         "gdb_stack_hex": deepdive.get("stack_hex"),
         "fault_mem": deepdive.get("fault_mem"),
         "inattr": parts.get("inattr"),
-        "objrebuild": ({"ptypes": p, "derefs": d}
-                       if parts.get("objrebuild") else None),
+        # objrebuild 本身就是 {ptypes, derefs} 的 JSON 可序列化 dict，直接透传
+        "objrebuild": parts.get("objrebuild") or None,
         "expr_evals": [{"expr": e, "output": out}
                        for e, out in (deepdive.get("expr_evals") or [])],
         "gdb_frames_full": deepdive.get("frames_full"),
