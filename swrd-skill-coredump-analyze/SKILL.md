@@ -1,14 +1,15 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.19.0
+version: 3.20.0
 ---
 
 # Coredump 智能分析
 
 ## 完成标准（DoD）——四条全达成才算完成本次分析
 
-1. **narrative.json 已写并通过校验**：按第 5 步产出后执行
+1. **narrative.json 已写并通过校验**：按第 5 步产出（**经 swrd-skill-writer
+   写入**，见"写文件规约"）后执行
    `python3.8 <技能根目录>/scripts/render_report.py <narrative.json> --check`，
    必须返回"校验通过"
 2. **叙事 HTML 已生成**：render_report.py 渲染出真实存在的
@@ -25,6 +26,17 @@ version: 3.19.0
 引擎 analyze 结束时会打印交付命令。任何一步失败（校验不过/模板缺失/
 命令报错）必须向用户说明原因并修复重试——**不许静默降级为只交 md
 报告**。
+
+## 写文件规约（硬约束）
+
+本技能流程中**一切文件写入必须调用 `swrd-skill-writer` 技能完成**——包括：
+- 首次配置时填写 `workspace/bmccore.toml`
+- 第 5 步产出 `narrative.json`
+
+禁止用写文件工具直接落盘（统一写入出口，便于审计与规范）。
+引擎程序经 execute_command 自己产出的报告/HTML 不属于"Agent 写文件"，
+不受此限。若环境中不存在 `swrd-skill-writer` 技能，向用户说明并询问
+处置方式——**不许静默改用直写**。
 
 ## 技能包结构（自带完整引擎，无需单独部署工具）
 
@@ -108,8 +120,8 @@ WS="<技能根目录>/workspace"
 ```
 
 **首次分析（或路径变化时）填一次配置**——技能自带模板
-`$WS/bmccore.toml`（变量齐全、路径留空），把各项路径填成绝对路径即可；
-之后每次分析只需一条短命令，不再拼长参数：
+`$WS/bmccore.toml`（变量齐全、路径留空），**经 swrd-skill-writer** 把
+各项路径填成绝对路径即可；之后每次分析只需一条短命令，不再拼长参数：
 
 ```toml
 # <技能根目录>/workspace/bmccore.toml
@@ -838,7 +850,8 @@ assert(dst + sizeof(pat) <= g_led->curve + sizeof(g_led->curve));
 | 修复方案 | 建议 | 基于根因推断 |
 ```
 
-**交付流程**：把六步法结果写成 `narrative.json`（全部中文；字段支持
+**交付流程**：把六步法结果**经 swrd-skill-writer 写入** `narrative.json`
+（全部中文；字段支持
 极简 markdown：段落/表格/```代码块```/**粗体**/`行内码`）：
 
 ```json
