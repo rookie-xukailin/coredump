@@ -1,7 +1,7 @@
 ---
 name: swrd-skill-coredump-analyze
 description: 分析 BMC/嵌入式 coredump 文件，结合符号表和源码给出根因分析与修复建议。当用户提供 core 文件、tar.gz 崩溃包、或提到"进程崩了/段错误/abort/内存被踩"时触发。
-version: 3.21.0
+version: 3.22.0
 ---
 
 # Coredump 智能分析
@@ -895,7 +895,9 @@ assert(dst + sizeof(pat) <= g_led->curve + sizeof(g_led->curve));
 - steps（≤10 步，每步一个动作）：`cap` 通俗字幕（必填）；`states` 演员状态
   ——线程 `run|wait|dead|sleep|fire`，锁/对象 `held:<持有者id>`（状态跨步
   持续到被改）；`arrows` `[[from,to,"标签"]]` 本步箭头（标"互等"自动变红）；
-  `ring:true` 死锁环高亮；`freeze:true` 定格为 core 现场（收尾用）
+  `ring:true` 死锁环高亮（**证据门控：仅当引擎锁分析节存在"⚠ 死锁
+  检测：线程 … 形成等待环"证据时才允许标注**，无死锁证据严禁使用——
+  滥用会被 --check 拒绝）；`freeze:true` 定格为 core 现场（收尾用）
 - 分镜素材直接来自六步法第 1/2/5 步（角色表/业务场景/因果链）——
   因果链的每个分句通常就是一步
 

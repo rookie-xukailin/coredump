@@ -161,6 +161,18 @@ def check(narr):
             for ar in (st.get("arrows") or []):
                 if len(ar) >= 2 and (ar[0] not in actor_ids or ar[1] not in actor_ids):
                     warns.append("animation.steps[%d].arrows 引用未知演员 %r→%r" % (i, ar[0], ar[1]))
+        # 死锁环证据门控：ring:true 而叙事全文无死锁依据 → 拒绝
+        if any(st.get("ring") for st in steps):
+            _blob = "\n".join(narr.get("scene") or []) + "\n" + \
+                (rc.get("mechanism") or "") + "\n" + \
+                (rc.get("culprit") or "") + "\n" + \
+                "\n".join(narr.get("gaps") or [])
+            if not re.search(r"死锁|互等|等待环", _blob):
+                errors.append(
+                    "animation 标注了死锁环（ring:true）但叙事全文没有死锁/"
+                    "互等/等待环的依据——ring 仅当引擎锁分析节存在"
+                    "'⚠ 死锁检测：线程 … 形成等待环'证据时才允许；"
+                    "非死锁案件请删除 ring")
     return errors, warns
 
 

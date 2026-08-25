@@ -487,6 +487,26 @@ def test_render_check():
         out1b = r1b.stdout.decode("utf-8", "replace")
         assert r1b.returncode == 1 and "业务源码证据缺失" in out1b, \
             "无 file:line 引用的叙事必须被硬门禁拒绝"
+        # 死锁环证据门控：ring 无依据被拒；有死锁叙事放行
+        ring_bad = {"summary": {"tldr": "x", "tldr_level": "确认"},
+                    "scene": ["T1 遍历链表（s.c:9）"],
+                    "root_cause": {"mechanism": "m（s.c:8）"},
+                    "animation": {"actors": [{"id": "t1", "type": "thread"}],
+                                  "steps": [{"cap": "定格", "ring": True}]}}
+        p_rb = os.path.join(tmp, "ring_bad.json")
+        with io.open(p_rb, "w", encoding="utf-8") as f:
+            _json.dump(ring_bad, f, ensure_ascii=False)
+        ring_ok = dict(ring_bad)
+        ring_ok["scene"] = ["T1 与 T2 形成死锁等待环（锁分析节证据）"]
+        p_ro = os.path.join(tmp, "ring_ok.json")
+        with io.open(p_ro, "w", encoding="utf-8") as f:
+            _json.dump(ring_ok, f, ensure_ascii=False)
+        rb = subprocess.run([sys.executable, rr, p_rb, "--check"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert rb.returncode == 1 and "死锁环" in rb.stdout.decode("utf-8", "replace")
+        ro = subprocess.run([sys.executable, rr, p_ro, "--check"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert ro.returncode == 0, ro.stdout.decode("utf-8", "replace")
         r2 = subprocess.run([sys.executable, rr, p_bad, "--check"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         out2 = r2.stdout.decode("utf-8", "replace")
