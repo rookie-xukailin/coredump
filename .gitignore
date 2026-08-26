@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+bmccore.toml
+bmccore_report/
+*.tar.gz.tmp
+.pytest_cache/
+.zcode/
+dist/
+swrd-skill-coredump-analyze/workspace/*
+!swrd-skill-coredump-analyze/workspace/bmccore.toml
+!swrd-skill-coredump-analyze/workspace/.gitkeep

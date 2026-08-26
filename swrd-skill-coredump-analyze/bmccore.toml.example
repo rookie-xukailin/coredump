@@ -1,0 +1,48 @@
+# bmccore 配置模板 —— 拷贝为 bmccore.toml 放在core文件同级目录（或其上层目录）。
+# 编译服务器路径固定时配一次，日常使用只需: python3 bmccore.py analyze <core包>
+
+# 符号表文件或目录的绝对路径（编译阶段单独产出的文件，含build-id+symtab+DWARF）
+# - 单个文件: symbol_table = "/home/bmc/build/symbols/main.elf"
+# - 目录:     symbol_table = "/home/bmc/build/symbols/"
+# - tar 包:   symbol_table = "/home/bmc/build/rootfs_symbol.tgz"
+#             （自动解压到 --workdir 下缓存复用，源包更新自动重解）
+symbol_table = "/home/bmc/build/symbols"
+
+# 源码树根（报告贴崩溃行上下文）
+source_root = "/home/bmc/src/bmc-project"
+
+# 固件staging根文件系统（so路径兜底 + libc识别）
+sysroot = "/home/bmc/build/rootfs"
+
+# 解包/中间文件目录（绝对路径；tar 包符号表也解到这里缓存复用）
+# workdir = "/home/bmc/core/workspace/intake"
+
+# 离线模式：true=纯 Python 不调用 gdb/addr2line（无交叉工具链时用）；
+# 机器上配了交叉工具链则保持 false（见下方 [toolchain.*]）
+# offline = false
+
+# 报告输出目录（默认core文件旁的 bmccore_report/）
+# output = "/home/bmc/reports"
+# format = "both"    # md / json / both
+
+# ---- 工具链（推荐 path 单路径方式：根目录或 bin 目录，其下 <triple>-gdb 等自动发现）----
+# [toolchain.arm64]
+# path = "/opt/toolchain/aarch64"
+# 也可逐个显式指定（最高优先）：gdb = "/opt/toolchain/bin/aarch64-linux-gnu-gdb"
+# 或 PATH 前缀方式：prefix = "aarch64-linux-gnu-"
+
+# [toolchain.arm32]
+# path = "/opt/toolchain/arm"
+
+# [toolchain.riscv64]
+# path = "/opt/toolchain/riscv64"
+
+# ---- 手动指定某模块符号表（自动配对失败时的逃生门）----
+# [module]
+# libfoo.so = "/home/bmc/build/symbols/libfoo.so.1.2"
+
+# 栈扫描最大深度（字节）
+# max_scan_depth = 65536
+
+# 锁扫描全内存盲扫（owner 未知的锁；O(内存) 纯 Python，大 core 极慢，默认快速模式）
+# lock_scan_full = false

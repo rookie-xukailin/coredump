@@ -1,0 +1,40 @@
+# bmccore 运行配置模板 —— 把路径填好后，日常分析只需一条短命令：
+#   python3.8 <技能根目录>/bmccore.py analyze <core包> --config 本文件
+#
+# 所有路径填绝对路径；暂不用的项留空("")即可，引擎会跳过对应能力。
+
+core         = ""     # 待分析的 core 包路径（留空=每次命令行传；填了则命令连 core 参数都不用带，
+                      # 换分析对象时改这里或命令行传参覆盖均可）
+
+symbol_table = ""     # 符号表：目录 / 单个 ELF / rootfs_symbol.tgz 包（tar 包自动解压缓存）
+source_root  = ""     # 工程源码树根（"为什么崩"的根因分析必需）
+sysroot      = ""     # 固件 staging rootfs（可选；so 路径兜底 + libc 识别）
+
+workdir      = ""     # 解包/中间产物目录（建议填 <技能根目录>/workspace/intake）
+output       = ""     # 报告输出目录（建议填 <技能根目录>/workspace/report；留空=core 旁 bmccore_report/）
+format       = "both" # md / json / both
+offline      = false  # 无交叉工具链改 true（纯 Python 零外部依赖）；配了下方工具链保持 false
+# lock_scan_full = false  # 锁扫描全内存盲扫（owner 未知的锁；O(内存)，大 core 可静默数十分钟，默认快速模式）
+# viz = false             # true=分析完成后自动弹浏览器打开可视化面板（服务持续运行，Ctrl-C 结束）
+# viz_port = 8080         # 面板首选端口（被占用自动+1）
+# viz_timeout = 0         # 面板超时秒（0=持续运行；无人值守场景建议设秒数）
+# gdb_timeout = 400       # 每个 gdb 进程超时秒（bt full/反汇编等；大 core 可调大）
+
+# ---- 交叉工具链（推荐：只给一个路径，gdb/addr2line/objdump 在其下自动发现）----
+# [toolchain.riscv64]
+# path = "/opt/xxx/riscv-toolchain"                     # 工具链根目录或 bin 目录均可，
+#                                                       # 其下 riscv64-*-gdb 等自动配对
+# 或给以 - 结尾的完整前缀：path = "/opt/xxx/bin/riscv64-unknown-linux-gnu-"
+# 也可逐个显式指定（最高优先）：gdb = "..." / addr2line = "..." / objdump = "..."
+
+# [toolchain.arm64]
+# path = "/opt/xxx/aarch64-toolchain"
+
+# [toolchain.arm32]
+# path = "/opt/xxx/arm-toolchain"
+
+# ---- 手动指定某模块符号表（自动配对失败时的逃生门）----
+# [module]
+# libfoo.so = "/绝对路径/libfoo.so.1.2"
+
+# max_scan_depth = 65536   # 栈扫描最大深度（字节）
